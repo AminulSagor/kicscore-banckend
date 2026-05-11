@@ -8,6 +8,8 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { UsersModule } from './modules/users/users.module';
 import { AwsModule } from './modules/aws/aws.module';
 import { FilesModule } from './modules/files/files.module';
+import { RedisModule } from './redis/redis.module';
+import { ApiFootballModule } from './api-football/api-football.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { FilesModule } from './modules/files/files.module';
     AuthModule,
     UsersModule,
     FilesModule,
+    RedisModule,
+    ApiFootballModule,
   ],
   providers: [
     {
