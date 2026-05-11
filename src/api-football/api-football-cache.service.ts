@@ -36,8 +36,10 @@ export class ApiFootballCacheService {
     const cachedData = await this.redisService.get<T>(cacheKey);
 
     if (cachedData) {
+      console.log('CACHE HIT:', cacheKey);
       return cachedData;
     }
+    console.log('CACHE MISS:', cacheKey);
 
     const hasLock = await this.redisService.setLock(lockKey, lockTtlSeconds);
 

@@ -10,6 +10,9 @@ import { AwsModule } from './modules/aws/aws.module';
 import { FilesModule } from './modules/files/files.module';
 import { RedisModule } from './redis/redis.module';
 import { ApiFootballModule } from './api-football/api-football.module';
+import { FirebaseModule } from './firebase/firebase.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { FollowsModule } from './modules/follows/follows.module';
 
 @Module({
   imports: [
@@ -23,6 +26,9 @@ import { ApiFootballModule } from './api-football/api-football.module';
     FilesModule,
     RedisModule,
     ApiFootballModule,
+    FirebaseModule,
+    NotificationsModule,
+    FollowsModule,
   ],
   providers: [
     {
