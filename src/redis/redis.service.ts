@@ -20,19 +20,65 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
     this.client = new Redis(redisUrl, {
       family: 0,
-      lazyConnect: true,
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: true,
+      lazyConnect: false,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      retryStrategy: (times) => {
+        const delay = Math.min(times * 100, 3000);
+        this.logger.warn(
+          `Redis reconnection attempt ${times}, retrying in ${delay}ms`,
+        );
+        return delay;
+      },
+      connectTimeout: 30000,
+      reconnectOnError: () => true,
+    });
+
+    this.setupErrorHandlers();
+  }
+
+  private setupErrorHandlers(): void {
+    this.client.on('error', (error) => {
+      this.logger.error('Redis error:', error);
+    });
+
+    this.client.on('close', () => {
+      this.logger.warn('Redis connection closed');
+    });
+
+    this.client.on('reconnecting', () => {
+      this.logger.log('Redis reconnecting...');
+    });
+
+    this.client.on('ready', () => {
+      this.logger.log('Redis ready');
+    });
+
+    this.client.on('connect', () => {
+      this.logger.log('Redis connected');
     });
   }
 
   async onModuleInit(): Promise<void> {
-    await this.client.connect();
-    this.logger.log('Redis connected successfully');
+    try {
+      await new Promise((resolve) => {
+        this.client.once('ready', () => {
+          this.logger.log('Redis connected successfully');
+          resolve(undefined);
+        });
+      });
+    } catch (error) {
+      this.logger.warn('Redis initialization warning:', error);
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.client.quit();
+    try {
+      await this.client.quit();
+      this.logger.log('Redis disconnected successfully');
+    } catch (error) {
+      this.logger.warn('Error disconnecting from Redis:', error);
+    }
   }
 
   getClient(): Redis {
