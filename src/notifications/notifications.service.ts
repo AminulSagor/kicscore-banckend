@@ -370,6 +370,144 @@ export class NotificationsService {
     return parsedValue;
   }
 
+  async sendEventToOwner(input: {
+    userId: string | null;
+    installationId: string | null;
+    notificationEvent: NotificationEvent;
+    title?: string;
+    body?: string;
+    imageUrl?: string | null;
+    deepLink?: string | null;
+    data?: Record<string, unknown> | null;
+  }): Promise<{
+    notification: UserNotification;
+    totalTokens: number;
+    sentCount: number;
+    failedCount: number;
+  }> {
+    const owner = this.resolveOwnerFromIds(input.userId, input.installationId);
+
+    const notification = await this.createNotificationForOwner({
+      owner,
+      notificationEvent: input.notificationEvent,
+      title: input.title ?? input.notificationEvent.title,
+      body: input.body ?? input.notificationEvent.body,
+      imageUrl: input.imageUrl ?? input.notificationEvent.imageUrl,
+      deepLink: input.deepLink ?? input.notificationEvent.deepLink,
+      data: input.data ?? null,
+    });
+
+    let deviceTokens: DeviceToken[] = [];
+
+    if (owner.userId) {
+      deviceTokens = await this.deviceTokensService.findActiveTokensByUserId(
+        owner.userId,
+      );
+    } else {
+      const installationId = owner.installationId;
+
+      if (!installationId) {
+        throw new BadRequestException(
+          'installationId is required for anonymous users',
+        );
+      }
+
+      deviceTokens =
+        await this.deviceTokensService.findActiveTokensByInstallationId(
+          installationId,
+        );
+    }
+
+    if (!deviceTokens.length) {
+      throw new BadRequestException('No active device token found');
+    }
+
+    // const deviceTokens = owner.userId
+    //   ? await this.deviceTokensService.findActiveTokensByUserId(owner.userId)
+    //   : await this.deviceTokensService.findActiveTokensByInstallationId(
+    //       owner.installationId,
+    //     );
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const deviceToken of deviceTokens) {
+      const delivery = await this.notificationDeliveryRepository.save(
+        this.notificationDeliveryRepository.create({
+          notificationId: notification.id,
+          deviceTokenId: deviceToken.id,
+          status: NotificationDeliveryStatus.PENDING,
+        }),
+      );
+
+      try {
+        const providerMessageId = await this.fcmService.sendToToken({
+          token: deviceToken.token,
+          title: input.title ?? input.notificationEvent.title,
+          body: input.body ?? input.notificationEvent.body,
+          imageUrl: input.imageUrl ?? input.notificationEvent.imageUrl,
+          data: this.toStringData(input.data),
+        });
+
+        delivery.status = NotificationDeliveryStatus.SENT;
+        delivery.providerMessageId = providerMessageId;
+        delivery.sentAt = new Date();
+
+        await this.notificationDeliveryRepository.save(delivery);
+        sentCount += 1;
+      } catch (error) {
+        const firebaseError = error as FirebaseError;
+
+        delivery.status = NotificationDeliveryStatus.FAILED;
+        delivery.errorCode = firebaseError.code ?? 'unknown_error';
+        delivery.errorMessage =
+          firebaseError.message ?? 'Failed to send notification';
+        delivery.failedAt = new Date();
+
+        await this.notificationDeliveryRepository.save(delivery);
+
+        await this.saveDeliveryResponseItems(delivery.id, {
+          code: delivery.errorCode,
+          message: delivery.errorMessage,
+        });
+
+        if (this.isInvalidFcmTokenError(delivery.errorCode)) {
+          await this.deviceTokensService.deactivateById(deviceToken.id);
+        }
+
+        failedCount += 1;
+      }
+    }
+
+    return {
+      notification,
+      totalTokens: deviceTokens.length,
+      sentCount,
+      failedCount,
+    };
+  }
+
+  private resolveOwnerFromIds(
+    userId: string | null,
+    installationId: string | null,
+  ): NotificationOwner {
+    if (userId) {
+      return {
+        userId,
+        installationId: null,
+      };
+    }
+
+    if (installationId) {
+      return {
+        userId: null,
+        installationId,
+      };
+    }
+
+    throw new BadRequestException('Notification owner is required');
+  }
+
   // for test only
   async testSend(
     dto: TestSendNotificationDto,
