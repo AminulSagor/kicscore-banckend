@@ -13,6 +13,7 @@ import { ApiFootballModule } from './api-football/api-football.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { FollowsModule } from './modules/follows/follows.module';
+import { FootballNotificationsModule } from './modules/football-notifications/football-notifications.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { FollowsModule } from './modules/follows/follows.module';
     FirebaseModule,
     NotificationsModule,
     FollowsModule,
+    FootballNotificationsModule,
   ],
   providers: [
     {
