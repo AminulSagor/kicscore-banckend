@@ -9,8 +9,9 @@ export class FcmService {
     token: string;
     title: string;
     body: string;
+    imageUrl?: string | null;
     data?: Record<string, string>;
-  }) {
+  }): Promise<string> {
     const messaging = this.firebaseAdminService.getMessaging();
 
     return messaging.send({
@@ -18,6 +19,7 @@ export class FcmService {
       notification: {
         title: params.title,
         body: params.body,
+        imageUrl: params.imageUrl ?? undefined,
       },
       data: params.data,
     });
