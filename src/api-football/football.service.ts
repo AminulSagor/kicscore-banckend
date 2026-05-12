@@ -186,6 +186,14 @@ export class FootballService {
     );
   }
 
+  getLeaguesSeasons(query: QueryParams): Promise<ApiFootballResponse> {
+    return this.cached(
+      '/leagues/seasons',
+      query,
+      apiFootballCacheConfig.leagueProfile,
+    );
+  }
+
   async searchAll(
     query: string,
     season: string,

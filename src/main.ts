@@ -7,28 +7,34 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  try {
+    const app = await NestFactory.create(AppModule);
 
-  app.use(helmet());
+    app.use(helmet());
 
-  app.enableCors({
-    origin: true,
-    credentials: true,
-  });
+    app.enableCors({
+      origin: true,
+      credentials: true,
+    });
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
 
-  app.useGlobalFilters(new HttpExceptionFilter());
-  app.useGlobalInterceptors(new ResponseInterceptor());
+    app.useGlobalFilters(new HttpExceptionFilter());
+    app.useGlobalInterceptors(new ResponseInterceptor());
 
-  const port = process.env.PORT ? Number(process.env.PORT) : 5000;
-  await app.listen(port);
+    const port = process.env.PORT ? Number(process.env.PORT) : 9000;
+    console.log(`Server is running on port ${port}`);
+    await app.listen(port);
+  } catch (error) {
+    console.error('Failed to bootstrap application:', error);
+    process.exit(1);
+  }
 }
 
 void bootstrap();
