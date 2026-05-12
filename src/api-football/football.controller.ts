@@ -136,4 +136,10 @@ export class FootballController {
   searchAll(@Query('q') query: string, @Query('season') season: string) {
     return this.footballService.searchAll(query, season);
   }
+
+  @Get('leagues/seasons')
+  getLeaguesSeasons(@Query() query: QueryParams) {
+    return this.footballService.getLeaguesSeasons(query);
+  }
 }
+

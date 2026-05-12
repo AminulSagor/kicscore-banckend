@@ -61,11 +61,25 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     try {
-      await new Promise((resolve) => {
-        this.client.once('ready', () => {
+      if (this.client.status === 'ready') {
+        this.logger.log('Redis connected successfully');
+        return;
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const handleReady = (): void => {
+          this.client.off('error', handleError);
           this.logger.log('Redis connected successfully');
-          resolve(undefined);
-        });
+          resolve();
+        };
+
+        const handleError = (error: Error): void => {
+          this.client.off('ready', handleReady);
+          reject(error);
+        };
+
+        this.client.once('ready', handleReady);
+        this.client.once('error', handleError);
       });
     } catch (error) {
       this.logger.warn('Redis initialization warning:', error);
