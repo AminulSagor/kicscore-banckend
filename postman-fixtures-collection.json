@@ -1,0 +1,563 @@
+{
+  "info": {
+    "name": "KicsCore Backend - Football Fixtures",
+    "description": "Collection for KicsCore Backend football fixtures endpoints. Tests the backend service that wraps API-Football v3 with intelligent caching based on fixture timing.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Get fixture by id",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?id=215662",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "id",
+              "value": "215662"
+            }
+          ]
+        },
+        "description": "Get a single fixture by id. Events, lineups, statistics and players are returned."
+      }
+    },
+    {
+      "name": "Get multiple fixtures by ids",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?ids=215662-215663-215664-215665-215666-215667",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "ids",
+              "value": "215662-215663-215664-215665-215666-215667"
+            }
+          ]
+        },
+        "description": "Get several fixtures by dash-separated ids."
+      }
+    },
+    {
+      "name": "Get all live fixtures",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?live=all",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "live",
+              "value": "all"
+            }
+          ]
+        },
+        "description": "Get all fixtures currently in play (live). Events are included."
+      }
+    },
+    {
+      "name": "Get live fixtures filtered by leagues",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?live=39-61-48",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "live",
+              "value": "39-61-48"
+            }
+          ]
+        },
+        "description": "Get live fixtures filtered by a list of league IDs (dash-separated)."
+      }
+    },
+    {
+      "name": "Get fixtures by league & season",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?league=39&season=2019",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "league",
+              "value": "39"
+            },
+            {
+              "key": "season",
+              "value": "2019"
+            }
+          ]
+        },
+        "description": "Get all fixtures for a specific league and season."
+      }
+    },
+    {
+      "name": "Get fixtures by date",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?date=2019-10-22",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "date",
+              "value": "2019-10-22"
+            }
+          ]
+        },
+        "description": "Get all fixtures for a specific date (YYYY-MM-DD format)."
+      }
+    },
+    {
+      "name": "Get next X fixtures",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?next=15",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "next",
+              "value": "15"
+            }
+          ]
+        },
+        "description": "Get the next X available fixtures."
+      }
+    },
+    {
+      "name": "Get last X fixtures",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?last=15",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "last",
+              "value": "15"
+            }
+          ]
+        },
+        "description": "Get the last X completed fixtures."
+      }
+    },
+    {
+      "name": "Mixed: date, league, season",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?date=2020-01-30&league=61&season=2019",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "date",
+              "value": "2020-01-30"
+            },
+            {
+              "key": "league",
+              "value": "61"
+            },
+            {
+              "key": "season",
+              "value": "2019"
+            }
+          ]
+        },
+        "description": "Get fixtures by mixing date, league, and season parameters."
+      }
+    },
+    {
+      "name": "Mixed: league & next",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?league=61&next=10",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "league",
+              "value": "61"
+            },
+            {
+              "key": "next",
+              "value": "10"
+            }
+          ]
+        },
+        "description": "Get the next 10 fixtures for a specific league."
+      }
+    },
+    {
+      "name": "Mixed: venue & next",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?venue=358&next=10",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "venue",
+              "value": "358"
+            },
+            {
+              "key": "next",
+              "value": "10"
+            }
+          ]
+        },
+        "description": "Get the next 10 fixtures for a specific venue."
+      }
+    },
+    {
+      "name": "Mixed: league, last, status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?league=61&last=10&status=ft",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "league",
+              "value": "61"
+            },
+            {
+              "key": "last",
+              "value": "10"
+            },
+            {
+              "key": "status",
+              "value": "ft"
+            }
+          ]
+        },
+        "description": "Get the last 10 finished (ft) fixtures for a league."
+      }
+    },
+    {
+      "name": "Team fixtures: last 10 with timezone",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/teams/85/fixtures?last=10&timezone=Europe/london",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "teams",
+            "85",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "last",
+              "value": "10"
+            },
+            {
+              "key": "timezone",
+              "value": "Europe/london"
+            }
+          ]
+        },
+        "description": "Get the last 10 fixtures for team 85 with timezone applied."
+      }
+    },
+    {
+      "name": "Team fixtures: date range",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/teams/85/fixtures?season=2019&from=2019-07-01&to=2020-10-31",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "teams",
+            "85",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "season",
+              "value": "2019"
+            },
+            {
+              "key": "from",
+              "value": "2019-07-01"
+            },
+            {
+              "key": "to",
+              "value": "2020-10-31"
+            }
+          ]
+        },
+        "description": "Get team fixtures within a date range in a specific season."
+      }
+    },
+    {
+      "name": "League fixtures: season, date range, timezone",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?league=61&season=2019&from=2019-07-01&to=2020-10-31&timezone=Europe/london",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "league",
+              "value": "61"
+            },
+            {
+              "key": "season",
+              "value": "2019"
+            },
+            {
+              "key": "from",
+              "value": "2019-07-01"
+            },
+            {
+              "key": "to",
+              "value": "2020-10-31"
+            },
+            {
+              "key": "timezone",
+              "value": "Europe/london"
+            }
+          ]
+        },
+        "description": "Get league fixtures within a season and date range with timezone conversion."
+      }
+    },
+    {
+      "name": "League fixtures: by round",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/football/fixtures?league=61&season=2019&round=Regular%20Season%20-%201",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "football",
+            "fixtures"
+          ],
+          "query": [
+            {
+              "key": "league",
+              "value": "61"
+            },
+            {
+              "key": "season",
+              "value": "2019"
+            },
+            {
+              "key": "round",
+              "value": "Regular Season - 1"
+            }
+          ]
+        },
+        "description": "Get fixtures for a specific round in a league season."
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    }
+  ]
+}
