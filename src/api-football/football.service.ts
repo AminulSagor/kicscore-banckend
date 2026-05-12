@@ -1,7 +1,13 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ApiFootballClient } from './api-football.client';
 import { ApiFootballCacheService } from './api-football-cache.service';
 import { apiFootballCacheConfig } from 'src/config/api-football-cache.config';
 import { buildApiFootballCacheKey } from '../common/utils/api-football-cache-key.util';
+import { RedisService } from '../redis/redis.service';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
@@ -10,6 +16,8 @@ type ApiFootballResponse = unknown;
 export class FootballService {
   constructor(
     private readonly apiFootballCacheService: ApiFootballCacheService,
+    private readonly apiFootballClient: ApiFootballClient,
+    private readonly redisService: RedisService,
   ) {}
 
   getLiveFixtures(): Promise<ApiFootballResponse> {
@@ -49,11 +57,7 @@ export class FootballService {
   }
 
   getFixtureLineups(fixtureId: string): Promise<ApiFootballResponse> {
-    return this.cached(
-      '/fixtures/lineups',
-      { fixture: fixtureId },
-      apiFootballCacheConfig.lineupsBeforeFound,
-    );
+    return this.getFixtureLineupsCached(fixtureId);
   }
 
   getFixturePlayers(fixtureId: string): Promise<ApiFootballResponse> {
@@ -98,7 +102,7 @@ export class FootballService {
         team: teamId,
         ...query,
       },
-      apiFootballCacheConfig.fixturesToday,
+      this.getFixturesTtl(query),
     );
   }
 
@@ -244,6 +248,61 @@ export class FootballService {
     });
   }
 
+  private async getFixtureLineupsCached(
+    fixtureId: string,
+  ): Promise<ApiFootballResponse> {
+    const endpoint = '/fixtures/lineups';
+    const params = { fixture: fixtureId };
+    const cacheKey = buildApiFootballCacheKey(endpoint, params);
+    const staleKey = `${cacheKey}:stale`;
+    const lockKey = `lock:${cacheKey}`;
+
+    const cachedData = await this.redisService.get<ApiFootballResponse>(cacheKey);
+
+    if (cachedData) {
+      return cachedData;
+    }
+
+    const hasLock = await this.redisService.setLock(lockKey, 10);
+
+    if (hasLock) {
+      try {
+        const freshData = await this.apiFootballClient.get<ApiFootballResponse>(
+          endpoint,
+          params,
+        );
+        const cacheConfig = this.getFixtureLineupsTtl(freshData);
+
+        await this.redisService.set(cacheKey, freshData, cacheConfig.ttl);
+        await this.redisService.set(staleKey, freshData, cacheConfig.staleTtl);
+
+        await this.trackApiUsage();
+
+        return freshData;
+      } finally {
+        await this.redisService.del(lockKey);
+      }
+    }
+
+    const dataAfterWait = await this.waitForFreshCache<ApiFootballResponse>(
+      cacheKey,
+    );
+
+    if (dataAfterWait) {
+      return dataAfterWait;
+    }
+
+    const staleData = await this.redisService.get<ApiFootballResponse>(staleKey);
+
+    if (staleData) {
+      return staleData;
+    }
+
+    throw new ServiceUnavailableException(
+      'Data is loading. Please try again shortly.',
+    );
+  }
+
   private getFixturesTtl(query: QueryParams): {
     ttl: number;
     staleTtl: number;
@@ -276,5 +335,53 @@ export class FootballService {
     }
 
     return apiFootballCacheConfig.fixturesToday;
+  }
+
+  private getFixtureLineupsTtl(response: ApiFootballResponse): {
+    ttl: number;
+    staleTtl: number;
+  } {
+    if (this.hasFixtureLineups(response)) {
+      return apiFootballCacheConfig.lineupsAfterFound;
+    }
+
+    return apiFootballCacheConfig.lineupsBeforeFound;
+  }
+
+  private hasFixtureLineups(response: ApiFootballResponse): boolean {
+    if (!response || typeof response !== 'object') {
+      return false;
+    }
+
+    const lineupResponse = response as { response?: unknown };
+
+    return Array.isArray(lineupResponse.response) && lineupResponse.response.length > 0;
+  }
+
+  private async waitForFreshCache<T>(cacheKey: string): Promise<T | null> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await this.delay(200);
+
+      const cachedData = await this.redisService.get<T>(cacheKey);
+
+      if (cachedData) {
+        return cachedData;
+      }
+    }
+
+    return null;
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  private async trackApiUsage(): Promise<void> {
+    const date = new Date().toISOString().slice(0, 10);
+    const key = `api-football:usage:${date}`;
+
+    await this.redisService.incrementDailyCounter(key, 60 * 60 * 48);
   }
 }

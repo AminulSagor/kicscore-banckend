@@ -10,6 +10,7 @@ import Redis from 'ioredis';
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private readonly client: Redis;
+  private isAvailable = false;
 
   constructor() {
     const redisUrl = process.env.REDIS_URL;
@@ -20,16 +21,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
     this.client = new Redis(redisUrl, {
       family: 0,
-      lazyConnect: false,
-      maxRetriesPerRequest: null,
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
       enableReadyCheck: false,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 100, 3000);
-        this.logger.warn(
-          `Redis reconnection attempt ${times}, retrying in ${delay}ms`,
-        );
-        return delay;
-      },
+      retryStrategy: () => null,
       connectTimeout: 30000,
       reconnectOnError: () => true,
     });
@@ -62,32 +57,26 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     try {
       if (this.client.status === 'ready') {
+        this.isAvailable = true;
         this.logger.log('Redis connected successfully');
         return;
       }
 
-      await new Promise<void>((resolve, reject) => {
-        const handleReady = (): void => {
-          this.client.off('error', handleError);
-          this.logger.log('Redis connected successfully');
-          resolve();
-        };
-
-        const handleError = (error: Error): void => {
-          this.client.off('ready', handleReady);
-          reject(error);
-        };
-
-        this.client.once('ready', handleReady);
-        this.client.once('error', handleError);
-      });
+      await this.client.connect();
+      this.isAvailable = true;
+      this.logger.log('Redis connected successfully');
     } catch (error) {
+      this.isAvailable = false;
       this.logger.warn('Redis initialization warning:', error);
     }
   }
 
   async onModuleDestroy(): Promise<void> {
     try {
+      if (!this.isAvailable) {
+        return;
+      }
+
       await this.client.quit();
       this.logger.log('Redis disconnected successfully');
     } catch (error) {
@@ -100,6 +89,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async get<T>(key: string): Promise<T | null> {
+    if (!this.isAvailable) {
+      return null;
+    }
+
     const value = await this.client.get(key);
 
     if (!value) {
@@ -110,14 +103,26 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async set<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
+    if (!this.isAvailable) {
+      return;
+    }
+
     await this.client.set(key, JSON.stringify(value), 'EX', ttlSeconds);
   }
 
   async del(key: string): Promise<void> {
+    if (!this.isAvailable) {
+      return;
+    }
+
     await this.client.del(key);
   }
 
   async setLock(key: string, ttlSeconds: number): Promise<boolean> {
+    if (!this.isAvailable) {
+      return false;
+    }
+
     const result = await this.client.set(key, '1', 'EX', ttlSeconds, 'NX');
     return result === 'OK';
   }
@@ -126,6 +131,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     key: string,
     ttlSeconds: number,
   ): Promise<number> {
+    if (!this.isAvailable) {
+      return 0;
+    }
+
     const value = await this.client.incr(key);
 
     if (value === 1) {
