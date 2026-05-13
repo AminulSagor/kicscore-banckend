@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { DatabaseConfigModule } from './config/database.config';
 import { AuthModule } from './modules/auth/auth.module';
@@ -13,12 +14,14 @@ import { ApiFootballModule } from './api-football/api-football.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { FollowsModule } from './modules/follows/follows.module';
+import { TheNewsModule } from './the-news/the-news.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     DatabaseConfigModule,
     AwsModule,
     AuthModule,
@@ -29,6 +32,7 @@ import { FollowsModule } from './modules/follows/follows.module';
     FirebaseModule,
     NotificationsModule,
     FollowsModule,
+    TheNewsModule,
   ],
   providers: [
     {
