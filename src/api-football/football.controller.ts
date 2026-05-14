@@ -1,12 +1,8 @@
 import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
 import { FootballService } from './football.service';
-import {
-  FixturesQueryDto,
-  PlayersQueryDto,
-  SearchQueryDto,
-  TeamsQueryDto,
-} from './dto/football-filters.dto';
+import { SearchQueryDto } from './dto/football-filters.dto';
+import { FootballQueryDto } from './dto/football-query.dto';
 
 @Public()
 @Controller('football')
@@ -19,12 +15,12 @@ export class FootballController {
   }
 
   @Get('fixtures/head-to-head')
-  getHeadToHead(@Query() query: FixturesQueryDto) {
+  getHeadToHead(@Query() query: FootballQueryDto) {
     return this.footballService.getHeadToHead(query);
   }
 
   @Get('fixtures/rounds')
-  getFixtureRounds(@Query() query: FixturesQueryDto) {
+  getFixtureRounds(@Query() query: FootballQueryDto) {
     return this.footballService.getFixtureRounds(query);
   }
 
@@ -54,85 +50,85 @@ export class FootballController {
   }
 
   @Get('fixtures')
-  getFixtures(@Query() query: FixturesQueryDto) {
+  getFixtures(@Query() query: FootballQueryDto) {
     return this.footballService.getFixtures(query);
   }
 
   @Get('teams/:teamId/fixtures')
   getTeamFixtures(
     @Param('teamId', ParseIntPipe) teamId: number,
-    @Query() query: FixturesQueryDto,
+    @Query() query: FootballQueryDto,
   ) {
     return this.footballService.getTeamFixtures(String(teamId), query);
   }
 
   @Get('teams')
-  getTeams(@Query() query: TeamsQueryDto) {
+  getTeams(@Query() query: FootballQueryDto) {
     return this.footballService.getTeams(query);
   }
 
   @Get('leagues')
-  getLeagues(@Query() query: TeamsQueryDto) {
+  getLeagues(@Query() query: FootballQueryDto) {
     return this.footballService.getLeagues(query);
   }
 
   @Get('countries')
-  getCountries(@Query() query: TeamsQueryDto) {
+  getCountries(@Query() query: FootballQueryDto) {
     return this.footballService.getCountries(query);
   }
 
   @Get('standings')
-  getStandings(@Query() query: TeamsQueryDto) {
+  getStandings(@Query() query: FootballQueryDto) {
     return this.footballService.getStandings(query);
   }
 
   @Get('players/squads')
-  getPlayerSquads(@Query() query: TeamsQueryDto) {
+  getPlayerSquads(@Query() query: FootballQueryDto) {
     return this.footballService.getPlayerSquads(query);
   }
 
   @Get('players/top-scorers')
-  getTopScorers(@Query() query: TeamsQueryDto) {
+  getTopScorers(@Query() query: FootballQueryDto) {
     return this.footballService.getTopScorers(query);
   }
 
   @Get('players/top-assists')
-  getTopAssists(@Query() query: TeamsQueryDto) {
+  getTopAssists(@Query() query: FootballQueryDto) {
     return this.footballService.getTopAssists(query);
   }
 
   @Get('players')
-  getPlayers(@Query() query: PlayersQueryDto) {
+  getPlayers(@Query() query: FootballQueryDto) {
     return this.footballService.getPlayers(query);
   }
 
   @Get('transfers')
-  getTransfers(@Query() query: TeamsQueryDto) {
+  getTransfers(@Query() query: FootballQueryDto) {
     return this.footballService.getTransfers(query);
   }
 
   @Get('injuries')
-  getInjuries(@Query() query: TeamsQueryDto) {
+  getInjuries(@Query() query: FootballQueryDto) {
     return this.footballService.getInjuries(query);
   }
 
   @Get('coaches')
-  getCoaches(@Query() query: TeamsQueryDto) {
+  getCoaches(@Query() query: FootballQueryDto) {
     return this.footballService.getCoaches(query);
   }
 
   @Get('trophies')
-  getTrophies(@Query() query: TeamsQueryDto) {
+  getTrophies(@Query() query: FootballQueryDto) {
     return this.footballService.getTrophies(query);
   }
 
   @Get('venues')
-  getVenues(@Query() query: TeamsQueryDto) {
+  getVenues(@Query() query: FootballQueryDto) {
     return this.footballService.getVenues(query);
   }
 
   @Get('predictions')
-  getPredictions(@Query() query: TeamsQueryDto) {
+  getPredictions(@Query() query: FootballQueryDto) {
     return this.footballService.getPredictions(query);
   }
 
@@ -142,8 +138,7 @@ export class FootballController {
   }
 
   @Get('leagues/seasons')
-  getLeaguesSeasons(@Query() query: TeamsQueryDto) {
+  getLeaguesSeasons(@Query() query: FootballQueryDto) {
     return this.footballService.getLeaguesSeasons(query);
   }
 }
-

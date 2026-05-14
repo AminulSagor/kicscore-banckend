@@ -51,8 +51,6 @@ export class FootballNotificationFanoutService {
             userId: follow.userId,
             installationId: null,
           });
-
-          continue;
         }
 
         if (follow.installationId) {
@@ -68,19 +66,23 @@ export class FootballNotificationFanoutService {
     let failedCount = 0;
 
     for (const owner of ownerMap.values()) {
-      const result = await this.notificationsService.sendEventToOwner({
-        userId: owner.userId,
-        installationId: owner.installationId,
-        notificationEvent: params.notificationEvent,
-        title: params.title,
-        body: params.body,
-        imageUrl: params.imageUrl,
-        deepLink: params.deepLink,
-        data: params.data,
-      });
+      try {
+        const result = await this.notificationsService.sendEventToOwner({
+          userId: owner.userId,
+          installationId: owner.installationId,
+          notificationEvent: params.notificationEvent,
+          title: params.title,
+          body: params.body,
+          imageUrl: params.imageUrl,
+          deepLink: params.deepLink,
+          data: params.data,
+        });
 
-      sentCount += result.sentCount;
-      failedCount += result.failedCount;
+        sentCount += result.sentCount;
+        failedCount += result.failedCount;
+      } catch {
+        failedCount += 1;
+      }
     }
 
     return {
