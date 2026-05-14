@@ -31,6 +31,42 @@
 $ npm install
 ```
 
+## TheNews sports sync
+
+This service fetches sports headlines hourly, stores them in Postgres, and serves them from the database.
+
+Required env vars:
+
+```bash
+THENEWS_API_BASE_URL=https://api.thenewsapi.com/v1
+THENEWS_API_TOKEN=your_token_here
+THENEWS_SPORTS_LIMIT=50
+THENEWS_SPORTS_LANGUAGE=en
+THENEWS_SYNC_CRON=0 * * * *
+THENEWS_CLEANUP_CRON=0 3 * * *
+THENEWS_RETENTION_DAYS=30
+THENEWS_FEED_CACHE_TTL_SECONDS=900
+THENEWS_FEED_CACHE_STALE_SECONDS=3600
+```
+
+Endpoints:
+
+```bash
+# Public read
+GET /news?page=1&limit=20
+GET /news/sports?page=1&limit=20
+GET /news/:uuid
+GET /news/:uuid/similar
+```
+
+Cron jobs:
+
+- Hourly (default): fetch sports news and upsert
+- Daily 3 AM (default): delete articles older than `THENEWS_RETENTION_DAYS`
+
+The `/news` feed response is cached in Redis for 15 to 60 minutes based on
+`THENEWS_FEED_CACHE_TTL_SECONDS` and `THENEWS_FEED_CACHE_STALE_SECONDS`.
+
 ## Compile and run the project
 
 ```bash

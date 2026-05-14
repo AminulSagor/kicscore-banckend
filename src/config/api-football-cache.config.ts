@@ -1,4 +1,4 @@
-const getNumberEnv = (key: string, fallback: number): number => {
+export const getNumberEnv = (key: string, fallback: number): number => {
   const value = process.env[key];
 
   if (!value) {
@@ -76,8 +76,3 @@ export const apiFootballCacheConfig = {
     staleTtl: getNumberEnv('CACHE_STALE_SEARCH_SECONDS', 2592000),
   },
 };
-
-
-
-
-
