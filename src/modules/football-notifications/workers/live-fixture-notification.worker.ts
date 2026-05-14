@@ -15,9 +15,28 @@ import { NotificationsService } from 'src/notifications/notifications.service';
 import { FootballNotificationFanoutService } from '../football-notification-fanout.service';
 import { FootballFixtureNotificationSnapshot } from '../entities/football-fixture-notification-snapshot.entity';
 import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.enum';
+import { FootballFixtureEventNotificationSnapshot } from '../entities/football-fixture-event-notification-snapshot.entity';
 
 interface ApiFootballLiveFixturesResponse {
   response?: ApiFootballFixture[];
+}
+
+interface ApiFootballFixtureEvent {
+  time: {
+    elapsed: number | null;
+    extra: number | null;
+  };
+  team: {
+    id: number | null;
+    name: string | null;
+  };
+  player: {
+    id: number | null;
+    name: string | null;
+  };
+  type: string;
+  detail: string;
+  comments: string | null;
 }
 
 interface ApiFootballFixture {
@@ -46,6 +65,7 @@ interface ApiFootballFixture {
     home: number | null;
     away: number | null;
   };
+  events?: ApiFootballFixtureEvent[];
 }
 
 @Injectable()
@@ -64,6 +84,8 @@ export class LiveFixtureNotificationWorker
 
     @InjectRepository(FootballFixtureNotificationSnapshot)
     private readonly snapshotRepository: Repository<FootballFixtureNotificationSnapshot>,
+    @InjectRepository(FootballFixtureEventNotificationSnapshot)
+    private readonly eventSnapshotRepository: Repository<FootballFixtureEventNotificationSnapshot>,
   ) {}
 
   onModuleInit(): void {
@@ -130,6 +152,222 @@ export class LiveFixtureNotificationWorker
         'lock:football-notifications:live-fixture-worker',
       );
     }
+  }
+
+  private async processCardEvents(params: {
+    fixture: ApiFootballFixture;
+    fixtureId: string;
+    leagueId: string;
+  }): Promise<void> {
+    const events = params.fixture.events ?? [];
+
+    for (const event of events) {
+      if (event.type !== 'Card') {
+        continue;
+      }
+
+      const detail = event.detail;
+
+      const isYellowCard = detail === 'Yellow Card';
+      const isRedCard = detail === 'Red Card';
+      const isSecondYellowCard = detail === 'Second Yellow Card';
+
+      if (!isYellowCard && !isRedCard && !isSecondYellowCard) {
+        continue;
+      }
+
+      const teamId = event.team.id ? String(event.team.id) : null;
+      const playerId = event.player.id ? String(event.player.id) : null;
+      const elapsed = event.time.elapsed;
+      const extra = event.time.extra;
+
+      if (!teamId) {
+        continue;
+      }
+
+      const dedupeKey = this.buildCardDedupeKey({
+        fixtureId: params.fixtureId,
+        teamId,
+        playerId,
+        elapsed,
+        extra,
+        detail,
+      });
+
+      const existingSnapshot = await this.eventSnapshotRepository.findOne({
+        where: {
+          dedupeKey,
+        },
+      });
+
+      if (existingSnapshot) {
+        continue;
+      }
+
+      await this.sendCardNotification({
+        fixture: params.fixture,
+        fixtureId: params.fixtureId,
+        leagueId: params.leagueId,
+        teamId,
+        teamName: event.team.name ?? 'Team',
+        playerName: event.player.name,
+        elapsed,
+        extra,
+        detail,
+        isYellowCard,
+        isRedCard,
+        isSecondYellowCard,
+      });
+
+      await this.eventSnapshotRepository.save(
+        this.eventSnapshotRepository.create({
+          fixtureId: params.fixtureId,
+          eventType: event.type,
+          eventDetail: detail,
+          teamId,
+          playerId,
+          elapsed,
+          extra,
+          dedupeKey,
+          notifiedAt: new Date(),
+        }),
+      );
+    }
+  }
+
+  private buildCardDedupeKey(params: {
+    fixtureId: string;
+    teamId: string;
+    playerId: string | null;
+    elapsed: number | null;
+    extra: number | null;
+    detail: string;
+  }): string {
+    return [
+      'card',
+      params.fixtureId,
+      params.teamId,
+      params.playerId ?? 'unknown-player',
+      params.elapsed ?? 'unknown-minute',
+      params.extra ?? 0,
+      params.detail.replace(/\s+/g, '-').toLowerCase(),
+    ].join(':');
+  }
+
+  private async sendCardNotification(params: {
+    fixture: ApiFootballFixture;
+    fixtureId: string;
+    leagueId: string;
+    teamId: string;
+    teamName: string;
+    playerName: string | null;
+    elapsed: number | null;
+    extra: number | null;
+    detail: string;
+    isYellowCard: boolean;
+    isRedCard: boolean;
+    isSecondYellowCard: boolean;
+  }): Promise<void> {
+    const minute = this.formatEventMinute(params.elapsed, params.extra);
+    const playerName = params.playerName ?? 'A player';
+
+    const title = params.isYellowCard
+      ? `Yellow card for ${params.teamName}`
+      : `Red card for ${params.teamName}`;
+
+    const body = params.isYellowCard
+      ? `${playerName} received a yellow card${minute ? ` at ${minute}` : ''}`
+      : `${playerName} was sent off${minute ? ` at ${minute}` : ''}`;
+
+    const deepLink = `/matches/${params.fixtureId}?tab=facts`;
+
+    const eventType = params.isYellowCard
+      ? NotificationType.YELLOW_CARD
+      : NotificationType.RED_CARD;
+
+    const notificationEvent = await this.notificationsService.createEvent({
+      eventType,
+      entityType: FollowEntityType.TEAM,
+      entityId: params.teamId,
+      fixtureId: params.fixtureId,
+      teamId: params.teamId,
+      leagueId: params.leagueId,
+      title,
+      body,
+      deepLink,
+      priority: params.isYellowCard
+        ? NotificationPriority.MEDIUM
+        : NotificationPriority.HIGH,
+      dedupeKey: this.buildCardDedupeKey({
+        fixtureId: params.fixtureId,
+        teamId: params.teamId,
+        playerId: null,
+        elapsed: params.elapsed,
+        extra: params.extra,
+        detail: params.detail,
+      }),
+      data: {
+        type: eventType,
+        fixtureId: params.fixtureId,
+        teamId: params.teamId,
+        leagueId: params.leagueId,
+        cardDetail: params.detail,
+        elapsed: params.elapsed,
+        extra: params.extra,
+      },
+    });
+
+    const targets = params.isYellowCard
+      ? [
+          {
+            entityType: FollowEntityType.TEAM,
+            entityId: params.teamId,
+          },
+        ]
+      : [
+          {
+            entityType: FollowEntityType.FIXTURE,
+            entityId: params.fixtureId,
+          },
+          {
+            entityType: FollowEntityType.TEAM,
+            entityId: params.teamId,
+          },
+          {
+            entityType: FollowEntityType.LEAGUE,
+            entityId: params.leagueId,
+          },
+        ];
+
+    await this.fanoutService.sendToFollowers({
+      targets,
+      notificationEvent,
+      title,
+      body,
+      deepLink,
+      data: {
+        type: eventType,
+        fixtureId: params.fixtureId,
+        teamId: params.teamId,
+        leagueId: params.leagueId,
+        cardDetail: params.detail,
+      },
+    });
+  }
+
+  private formatEventMinute(
+    elapsed: number | null,
+    extra: number | null,
+  ): string | null {
+    if (elapsed === null) {
+      return null;
+    }
+
+    if (extra !== null && extra > 0) {
+      return `${elapsed}+${extra}'`;
+    }
+
+    return `${elapsed}'`;
   }
 
   private async processFixture(fixture: ApiFootballFixture): Promise<void> {
@@ -225,6 +463,12 @@ export class LiveFixtureNotificationWorker
         currentStatus: statusShort,
       });
     }
+
+    await this.processCardEvents({
+      fixture,
+      fixtureId,
+      leagueId,
+    });
 
     snapshot.homeGoals = homeGoals;
     snapshot.awayGoals = awayGoals;

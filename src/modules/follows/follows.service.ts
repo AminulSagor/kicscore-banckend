@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, IsNull, Repository } from 'typeorm';
+import { FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 
 import { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CreateFollowDto } from './dto/create-follow.dto';
@@ -220,6 +220,22 @@ export class FollowsService {
       where: {
         entityType: params.entityType,
         entityId: String(params.entityId),
+        isActive: true,
+        notificationEnabled: true,
+      },
+      relations: {
+        entitySnapshot: true,
+        metadataItems: true,
+      },
+    });
+  }
+
+  async findActiveFollowsByEntityTypes(
+    entityTypes: FollowEntityType[],
+  ): Promise<Follow[]> {
+    return this.followRepository.find({
+      where: {
+        entityType: In(entityTypes),
         isActive: true,
         notificationEnabled: true,
       },
