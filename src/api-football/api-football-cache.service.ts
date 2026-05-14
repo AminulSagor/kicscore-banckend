@@ -1,6 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { RedisService } from '../redis/redis.service';
 import { ApiFootballClient } from './api-football.client';
+import { ApiFootballRequestPriority } from './enums/api-football-request-priority.enum';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 
@@ -11,6 +12,7 @@ interface CachedApiOptions<T> {
   ttlSeconds: number;
   staleTtlSeconds: number;
   lockTtlSeconds?: number;
+  priority?: ApiFootballRequestPriority;
 }
 
 @Injectable()
@@ -28,6 +30,7 @@ export class ApiFootballCacheService {
       ttlSeconds,
       staleTtlSeconds,
       lockTtlSeconds = 10,
+      priority = ApiFootballRequestPriority.MEDIUM,
     } = options;
 
     const staleKey = `${cacheKey}:stale`;
@@ -45,6 +48,18 @@ export class ApiFootballCacheService {
 
     if (hasLock) {
       try {
+        const staleData = await this.redisService.get<T>(staleKey);
+
+        try {
+          await this.assertApiBudgetAllowsRequest(priority);
+        } catch (error) {
+          if (staleData) {
+            return staleData;
+          }
+
+          throw error;
+        }
+
         const freshData = await this.apiFootballClient.get<T>(endpoint, params);
 
         await this.redisService.set(cacheKey, freshData, ttlSeconds);
@@ -75,6 +90,65 @@ export class ApiFootballCacheService {
     );
   }
 
+  async assertApiBudgetAllowsRequest(
+    priority = ApiFootballRequestPriority.MEDIUM,
+  ): Promise<void> {
+    const usagePercent = await this.getUsagePercent();
+
+    const softLimit = this.getNumberEnv('API_FOOTBALL_SOFT_LIMIT_PERCENT', 70);
+    const lowPriorityCutoff = this.getNumberEnv(
+      'API_FOOTBALL_LOW_PRIORITY_CUTOFF_PERCENT',
+      85,
+    );
+    const hardLimit = this.getNumberEnv('API_FOOTBALL_HARD_LIMIT_PERCENT', 95);
+
+    if (
+      usagePercent >= hardLimit &&
+      priority !== ApiFootballRequestPriority.HIGH
+    ) {
+      throw new ServiceUnavailableException(
+        'API-Football daily limit is almost used. Only high-priority refresh is allowed.',
+      );
+    }
+
+    if (
+      usagePercent >= lowPriorityCutoff &&
+      priority === ApiFootballRequestPriority.LOW
+    ) {
+      throw new ServiceUnavailableException(
+        'API-Football low-priority refresh is paused.',
+      );
+    }
+
+    if (usagePercent >= softLimit) {
+      // For now, this is only a soft checkpoint.
+      // Later we can use it to increase TTL dynamically.
+      return;
+    }
+  }
+
+  async getUsagePercent(): Promise<number> {
+    const limit = this.getNumberEnv('API_FOOTBALL_DAILY_LIMIT', 75000);
+    const date = new Date().toISOString().slice(0, 10);
+    const key = `api-football:usage:${date}`;
+
+    const rawValue = await this.redisService.getClient().get(key);
+    const used = rawValue ? Number(rawValue) : 0;
+
+    if (!limit || Number.isNaN(used)) {
+      return 0;
+    }
+
+    return (used / limit) * 100;
+  }
+
+  async trackApiUsage(): Promise<void> {
+    const date = new Date().toISOString().slice(0, 10);
+    const key = `api-football:usage:${date}`;
+
+    await this.redisService.incrementDailyCounter(key, 60 * 60 * 48);
+  }
+
   private async waitForFreshCache<T>(cacheKey: string): Promise<T | null> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await this.delay(200);
@@ -95,10 +169,15 @@ export class ApiFootballCacheService {
     });
   }
 
-  private async trackApiUsage(): Promise<void> {
-    const date = new Date().toISOString().slice(0, 10);
-    const key = `api-football:usage:${date}`;
+  private getNumberEnv(key: string, fallback: number): number {
+    const value = process.env[key];
 
-    await this.redisService.incrementDailyCounter(key, 60 * 60 * 48);
+    if (!value) {
+      return fallback;
+    }
+
+    const parsedValue = Number(value);
+
+    return Number.isNaN(parsedValue) ? fallback : parsedValue;
   }
 }

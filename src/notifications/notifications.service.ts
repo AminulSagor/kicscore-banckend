@@ -231,6 +231,24 @@ export class NotificationsService {
   async createNotificationForOwner(
     input: CreateNotificationForOwnerInput,
   ): Promise<UserNotification> {
+    const ownerWhere = this.getOwnerWhere(input.owner);
+
+    const existingNotification = await this.userNotificationRepository.findOne({
+      where: {
+        ...ownerWhere,
+        notificationEventId: input.notificationEvent.id,
+      },
+      relations: {
+        notificationEvent: true,
+        contentSnapshot: true,
+        payloadItems: true,
+      },
+    });
+
+    if (existingNotification) {
+      return existingNotification;
+    }
+
     const notification = this.userNotificationRepository.create({
       userId: input.owner.userId,
       installationId: input.owner.installationId,
@@ -252,7 +270,16 @@ export class NotificationsService {
 
     await this.syncNotificationPayloadItems(savedNotification.id, input.data);
 
-    return savedNotification;
+    return this.userNotificationRepository.findOneOrFail({
+      where: {
+        id: savedNotification.id,
+      },
+      relations: {
+        notificationEvent: true,
+        contentSnapshot: true,
+        payloadItems: true,
+      },
+    });
   }
 
   private async saveNotificationContentSnapshot(params: {
@@ -419,7 +446,12 @@ export class NotificationsService {
     }
 
     if (!deviceTokens.length) {
-      throw new BadRequestException('No active device token found');
+      return {
+        notification,
+        totalTokens: 0,
+        sentCount: 0,
+        failedCount: 0,
+      };
     }
 
     // const deviceTokens = owner.userId

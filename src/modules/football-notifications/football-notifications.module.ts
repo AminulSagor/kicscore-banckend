@@ -7,7 +7,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
 import { FollowsModule } from '../follows/follows.module';
 import { FootballFixtureNotificationSnapshot } from './entities/football-fixture-notification-snapshot.entity';
 import { FootballNotificationFanoutService } from './football-notification-fanout.service';
-import { GoalNotificationWorker } from './workers/goal-notification.worker';
+import { LiveFixtureNotificationWorker } from './workers/live-fixture-notification.worker';
 
 @Module({
   imports: [
@@ -17,7 +17,7 @@ import { GoalNotificationWorker } from './workers/goal-notification.worker';
     FollowsModule,
     TypeOrmModule.forFeature([FootballFixtureNotificationSnapshot]),
   ],
-  providers: [FootballNotificationFanoutService, GoalNotificationWorker],
+  providers: [FootballNotificationFanoutService, LiveFixtureNotificationWorker],
   exports: [FootballNotificationFanoutService],
 })
 export class FootballNotificationsModule {}
