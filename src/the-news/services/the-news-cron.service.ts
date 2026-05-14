@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { TheNewsService } from './the-news.service';
+import { NewsNotificationWorker } from './news-notification.worker';
 
 const getCronExpression = (key: string, fallback: string): string => {
   const value = process.env[key];
@@ -29,7 +30,10 @@ const cleanupCronExpression = getCronExpression(
 export class TheNewsCronService implements OnModuleInit {
   private readonly logger = new Logger(TheNewsCronService.name);
 
-  constructor(private readonly theNewsService: TheNewsService) {}
+  constructor(
+    private readonly theNewsService: TheNewsService,
+    private readonly newsNotificationWorker: NewsNotificationWorker,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.handleSportsNewsSync();
@@ -43,6 +47,10 @@ export class TheNewsCronService implements OnModuleInit {
       this.logger.log(
         `Sports news sync completed. Fetched: ${result.fetched}, Saved: ${result.saved}`,
       );
+
+      if (process.env.THENEWS_NOTIFICATION_WORKER_ENABLED === 'true') {
+        await this.newsNotificationWorker.processPendingNewsNotifications();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
 
@@ -53,7 +61,8 @@ export class TheNewsCronService implements OnModuleInit {
   @Cron(cleanupCronExpression)
   async handleOldNewsCleanup(): Promise<void> {
     try {
-      const result = await this.theNewsService.deleteArticlesOlderThanThirtyDays();
+      const result =
+        await this.theNewsService.deleteArticlesOlderThanThirtyDays();
 
       this.logger.log(
         `Old news cleanup completed. Deleted: ${result.deleted}, Cutoff: ${result.cutoffDate.toISOString()}`,
