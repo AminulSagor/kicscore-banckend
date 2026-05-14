@@ -15,6 +15,7 @@ import { FirebaseModule } from './firebase/firebase.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { FollowsModule } from './modules/follows/follows.module';
 import { TheNewsModule } from './the-news/the-news.module';
+import { FootballNotificationsModule } from './modules/football-notifications/football-notifications.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { TheNewsModule } from './the-news/the-news.module';
     NotificationsModule,
     FollowsModule,
     TheNewsModule,
+    FootballNotificationsModule,
   ],
   providers: [
     {

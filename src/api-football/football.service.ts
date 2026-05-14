@@ -1,13 +1,15 @@
 import {
-  Injectable,
   BadRequestException,
+  Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
+
 import { ApiFootballClient } from './api-football.client';
 import { ApiFootballCacheService } from './api-football-cache.service';
 import { apiFootballCacheConfig } from 'src/config/api-football-cache.config';
 import { buildApiFootballCacheKey } from '../common/utils/api-football-cache-key.util';
 import { RedisService } from '../redis/redis.service';
+import { ApiFootballRequestPriority } from './enums/api-football-request-priority.enum';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
@@ -25,6 +27,7 @@ export class FootballService {
       '/fixtures',
       { live: 'all' },
       apiFootballCacheConfig.liveFixtures,
+      ApiFootballRequestPriority.HIGH,
     );
   }
 
@@ -37,6 +40,7 @@ export class FootballService {
       '/fixtures',
       { ids: fixtureId },
       apiFootballCacheConfig.liveFixtureDetail,
+      ApiFootballRequestPriority.HIGH,
     );
   }
 
@@ -45,6 +49,7 @@ export class FootballService {
       '/fixtures/events',
       { fixture: fixtureId },
       apiFootballCacheConfig.liveEvents,
+      ApiFootballRequestPriority.HIGH,
     );
   }
 
@@ -53,6 +58,7 @@ export class FootballService {
       '/fixtures/statistics',
       { fixture: fixtureId },
       apiFootballCacheConfig.liveStats,
+      ApiFootballRequestPriority.HIGH,
     );
   }
 
@@ -119,6 +125,7 @@ export class FootballService {
       '/countries',
       query,
       apiFootballCacheConfig.leagueProfile,
+      ApiFootballRequestPriority.LOW,
     );
   }
 
@@ -175,11 +182,17 @@ export class FootballService {
       '/trophies',
       query,
       apiFootballCacheConfig.leagueProfile,
+      ApiFootballRequestPriority.LOW,
     );
   }
 
   getVenues(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached('/venues', query, apiFootballCacheConfig.leagueProfile);
+    return this.cached(
+      '/venues',
+      query,
+      apiFootballCacheConfig.leagueProfile,
+      ApiFootballRequestPriority.LOW,
+    );
   }
 
   getPredictions(query: QueryParams): Promise<ApiFootballResponse> {
@@ -187,6 +200,7 @@ export class FootballService {
       '/predictions',
       query,
       apiFootballCacheConfig.fixturesToday,
+      ApiFootballRequestPriority.LOW,
     );
   }
 
@@ -235,6 +249,7 @@ export class FootballService {
     endpoint: string,
     params: QueryParams,
     cacheConfig: { ttl: number; staleTtl: number },
+    priority = ApiFootballRequestPriority.MEDIUM,
   ): Promise<ApiFootballResponse> {
     const cacheKey = buildApiFootballCacheKey(endpoint, params);
 
@@ -245,6 +260,7 @@ export class FootballService {
       ttlSeconds: cacheConfig.ttl,
       staleTtlSeconds: cacheConfig.staleTtl,
       lockTtlSeconds: 10,
+      priority,
     });
   }
 
@@ -257,7 +273,8 @@ export class FootballService {
     const staleKey = `${cacheKey}:stale`;
     const lockKey = `lock:${cacheKey}`;
 
-    const cachedData = await this.redisService.get<ApiFootballResponse>(cacheKey);
+    const cachedData =
+      await this.redisService.get<ApiFootballResponse>(cacheKey);
 
     if (cachedData) {
       return cachedData;
@@ -267,16 +284,32 @@ export class FootballService {
 
     if (hasLock) {
       try {
+        const staleData =
+          await this.redisService.get<ApiFootballResponse>(staleKey);
+
+        try {
+          await this.apiFootballCacheService.assertApiBudgetAllowsRequest(
+            ApiFootballRequestPriority.HIGH,
+          );
+        } catch (error) {
+          if (staleData) {
+            return staleData;
+          }
+
+          throw error;
+        }
+
         const freshData = await this.apiFootballClient.get<ApiFootballResponse>(
           endpoint,
           params,
         );
+
         const cacheConfig = this.getFixtureLineupsTtl(freshData);
 
         await this.redisService.set(cacheKey, freshData, cacheConfig.ttl);
         await this.redisService.set(staleKey, freshData, cacheConfig.staleTtl);
 
-        await this.trackApiUsage();
+        await this.apiFootballCacheService.trackApiUsage();
 
         return freshData;
       } finally {
@@ -284,15 +317,15 @@ export class FootballService {
       }
     }
 
-    const dataAfterWait = await this.waitForFreshCache<ApiFootballResponse>(
-      cacheKey,
-    );
+    const dataAfterWait =
+      await this.waitForFreshCache<ApiFootballResponse>(cacheKey);
 
     if (dataAfterWait) {
       return dataAfterWait;
     }
 
-    const staleData = await this.redisService.get<ApiFootballResponse>(staleKey);
+    const staleData =
+      await this.redisService.get<ApiFootballResponse>(staleKey);
 
     if (staleData) {
       return staleData;
@@ -355,7 +388,10 @@ export class FootballService {
 
     const lineupResponse = response as { response?: unknown };
 
-    return Array.isArray(lineupResponse.response) && lineupResponse.response.length > 0;
+    return (
+      Array.isArray(lineupResponse.response) &&
+      lineupResponse.response.length > 0
+    );
   }
 
   private async waitForFreshCache<T>(cacheKey: string): Promise<T | null> {
@@ -376,12 +412,5 @@ export class FootballService {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
-  }
-
-  private async trackApiUsage(): Promise<void> {
-    const date = new Date().toISOString().slice(0, 10);
-    const key = `api-football:usage:${date}`;
-
-    await this.redisService.incrementDailyCounter(key, 60 * 60 * 48);
   }
 }

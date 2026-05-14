@@ -108,4 +108,14 @@ export class DeviceTokensService {
       },
     });
   }
+
+  async deactivateById(deviceTokenId: string): Promise<void> {
+    await this.deviceTokenRepository.update(
+      { id: deviceTokenId },
+      {
+        isActive: false,
+        lastSeenAt: new Date(),
+      },
+    );
+  }
 }

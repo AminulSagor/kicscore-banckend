@@ -2,23 +2,36 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, IsNull, Repository } from 'typeorm';
 
+import { JwtPayload } from '../auth/types/jwt-payload.type';
+import { CreateFollowDto } from './dto/create-follow.dto';
+import { FollowStatusQueryDto } from './dto/follow-status-query.dto';
+import { GetFollowsQueryDto } from './dto/get-follows-query.dto';
+import { FollowEntitySnapshot } from './entities/follow-entity-snapshot.entity';
+import { FollowMetadataItem } from './entities/follow-metadata-item.entity';
 import { Follow } from './entities/follow.entity';
 import { FollowEntityType } from './enums/follow-entity-type.enum';
-import { CreateFollowDto } from './dto/create-follow.dto';
-import { JwtPayload } from '../auth/types/jwt-payload.type';
-import { GetFollowsQueryDto } from './dto/get-follows-query.dto';
-import { FollowStatusQueryDto } from './dto/follow-status-query.dto';
 
-interface FollowOwner {
-  userId: string | null;
-  installationId: string | null;
-}
+type FollowOwner =
+  | {
+      userId: string;
+      installationId: null;
+    }
+  | {
+      userId: null;
+      installationId: string;
+    };
 
 @Injectable()
 export class FollowsService {
   constructor(
     @InjectRepository(Follow)
     private readonly followRepository: Repository<Follow>,
+
+    @InjectRepository(FollowEntitySnapshot)
+    private readonly followEntitySnapshotRepository: Repository<FollowEntitySnapshot>,
+
+    @InjectRepository(FollowMetadataItem)
+    private readonly followMetadataItemRepository: Repository<FollowMetadataItem>,
   ) {}
 
   async follow(dto: CreateFollowDto, user: JwtPayload | null): Promise<Follow> {
@@ -31,6 +44,10 @@ export class FollowsService {
         entityType: dto.entityType,
         entityId,
       },
+      relations: {
+        entitySnapshot: true,
+        metadataItems: true,
+      },
     });
 
     if (!follow) {
@@ -42,13 +59,19 @@ export class FollowsService {
       });
     }
 
-    follow.entityName = dto.entityName ?? follow.entityName ?? null;
-    follow.entityLogo = dto.entityLogo ?? follow.entityLogo ?? null;
-    follow.metadata = dto.metadata ?? follow.metadata ?? null;
     follow.notificationEnabled = dto.notificationEnabled ?? true;
     follow.isActive = true;
 
-    return this.followRepository.save(follow);
+    const savedFollow = await this.followRepository.save(follow);
+
+    await this.upsertEntitySnapshot(savedFollow.id, {
+      entityName: dto.entityName,
+      entityLogo: dto.entityLogo,
+    });
+
+    await this.syncMetadataItems(savedFollow.id, dto.metadata);
+
+    return this.getFollowById(savedFollow.id);
   }
 
   async unfollow(params: {
@@ -95,6 +118,10 @@ export class FollowsService {
 
     return this.followRepository.find({
       where,
+      relations: {
+        entitySnapshot: true,
+        metadataItems: true,
+      },
       order: {
         createdAt: 'DESC',
       },
@@ -117,6 +144,10 @@ export class FollowsService {
         entityId: String(query.entityId),
         isActive: true,
       },
+      relations: {
+        entitySnapshot: true,
+        metadataItems: true,
+      },
     });
 
     return {
@@ -136,6 +167,10 @@ export class FollowsService {
         userId: IsNull(),
         installationId,
         isActive: true,
+      },
+      relations: {
+        entitySnapshot: true,
+        metadataItems: true,
       },
     });
 
@@ -188,7 +223,85 @@ export class FollowsService {
         isActive: true,
         notificationEnabled: true,
       },
+      relations: {
+        entitySnapshot: true,
+        metadataItems: true,
+      },
     });
+  }
+
+  private async getFollowById(followId: string): Promise<Follow> {
+    const follow = await this.followRepository.findOne({
+      where: {
+        id: followId,
+      },
+      relations: {
+        entitySnapshot: true,
+        metadataItems: true,
+      },
+    });
+
+    if (!follow) {
+      throw new BadRequestException('Follow not found after save');
+    }
+
+    return follow;
+  }
+
+  private async upsertEntitySnapshot(
+    followId: string,
+    data: {
+      entityName?: string;
+      entityLogo?: string;
+    },
+  ): Promise<void> {
+    if (data.entityName === undefined && data.entityLogo === undefined) {
+      return;
+    }
+
+    let snapshot = await this.followEntitySnapshotRepository.findOne({
+      where: {
+        followId,
+      },
+    });
+
+    if (!snapshot) {
+      snapshot = this.followEntitySnapshotRepository.create({
+        followId,
+      });
+    }
+
+    snapshot.entityName = data.entityName ?? snapshot.entityName ?? null;
+    snapshot.entityLogo = data.entityLogo ?? snapshot.entityLogo ?? null;
+
+    await this.followEntitySnapshotRepository.save(snapshot);
+  }
+
+  private async syncMetadataItems(
+    followId: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!metadata) {
+      return;
+    }
+
+    await this.followMetadataItemRepository.delete({
+      followId,
+    });
+
+    const items = Object.entries(metadata)
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) =>
+        this.followMetadataItemRepository.create({
+          followId,
+          key,
+          value: String(value),
+        }),
+      );
+
+    if (items.length) {
+      await this.followMetadataItemRepository.save(items);
+    }
   }
 
   private resolveOwner(
