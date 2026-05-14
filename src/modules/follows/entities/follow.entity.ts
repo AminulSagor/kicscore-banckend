@@ -52,9 +52,10 @@ export class Follow {
   installationId: string | null;
 
   @Column({
-    name: 'entity_type',
+    name: 'target_entity_type',
     type: 'enum',
     enum: FollowEntityType,
+    enumName: 'follow_entity_type_enum',
   })
   entityType: FollowEntityType;
 

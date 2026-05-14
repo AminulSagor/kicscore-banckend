@@ -47,11 +47,7 @@ export class EntityNotificationSetting {
   })
   installationId: string | null;
 
-  @Column({
-    name: 'entity_type',
-    type: 'enum',
-    enum: FollowEntityType,
-  })
+  @Column({ name: 'entity_type', type: 'varchar', length: 20 })
   entityType: FollowEntityType;
 
   @Column({ name: 'entity_id', type: 'varchar', length: 80 })
