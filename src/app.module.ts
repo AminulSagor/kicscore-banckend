@@ -16,6 +16,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { FollowsModule } from './modules/follows/follows.module';
 import { TheNewsModule } from './the-news/the-news.module';
 import { FootballNotificationsModule } from './modules/football-notifications/football-notifications.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { FootballNotificationsModule } from './modules/football-notifications/fo
     DatabaseConfigModule,
     AwsModule,
     AuthModule,
+    AdminModule,
     UsersModule,
     FilesModule,
     RedisModule,

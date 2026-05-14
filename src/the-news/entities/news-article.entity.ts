@@ -3,55 +3,35 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  OneToMany,
+  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-
-import { NewsMappedEntity } from '../types/news-entity-mapping.type';
+import { NewsArticleContent } from './news-article-content.entity';
+import { NewsArticleSource } from './news-article-source.entity';
+import { NewsArticleCategory } from './news-article-category.entity';
+import { NewsArticleMappedEntity } from './news-article-mapped-entity.entity';
+import { NewsArticlePayloadItem } from './news-article-payload-item.entity';
 
 @Entity('news_articles')
+@Index('idx_news_articles_external_uuid', ['externalUuid'], { unique: true })
+@Index('idx_news_articles_published_at', ['publishedAt'])
 export class NewsArticle {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index({ unique: true })
   @Column({ name: 'external_uuid', type: 'varchar', length: 100 })
   externalUuid: string;
 
   @Column({ type: 'varchar', length: 700 })
   title: string;
 
-  @Column({ type: 'text', nullable: true })
-  description: string | null;
-
-  @Column({ type: 'text', nullable: true })
-  keywords: string | null;
-
-  @Column({ type: 'text', nullable: true })
-  snippet: string | null;
-
   @Column({ type: 'text' })
   url: string;
 
-  @Column({ name: 'image_url', type: 'text', nullable: true })
-  imageUrl: string | null;
-
   @Column({ type: 'varchar', length: 20, nullable: true })
   language: string | null;
-
-  @Index()
-  @Column({ name: 'published_at', type: 'timestamptz' })
-  publishedAt: Date;
-
-  @Column({ type: 'varchar', length: 255, nullable: true })
-  source: string | null;
-
-  @Column({
-    type: 'text',
-    array: true,
-    default: () => "'{}'",
-  })
-  categories: string[];
 
   @Column({ type: 'varchar', length: 20, nullable: true })
   locale: string | null;
@@ -63,14 +43,29 @@ export class NewsArticle {
   })
   relevanceScore: number | null;
 
-  @Column({ name: 'raw_payload', type: 'jsonb' })
-  rawPayload: Record<string, any>;
-
-  @Column({ name: 'mapped_entities', type: 'jsonb', default: () => "'[]'" })
-  mappedEntities: NewsMappedEntity[];
+  @Column({ name: 'published_at', type: 'timestamptz' })
+  publishedAt: Date;
 
   @Column({ name: 'last_fetched_at', type: 'timestamptz' })
   lastFetchedAt: Date;
+
+  @OneToOne(() => NewsArticleContent, (content) => content.article)
+  content: NewsArticleContent | null;
+
+  @OneToOne(() => NewsArticleSource, (source) => source.article)
+  source: NewsArticleSource | null;
+
+  @OneToMany(() => NewsArticleCategory, (category) => category.article)
+  categories: NewsArticleCategory[];
+
+  @OneToMany(
+    () => NewsArticleMappedEntity,
+    (mappedEntity) => mappedEntity.article,
+  )
+  mappedEntities: NewsArticleMappedEntity[];
+
+  @OneToMany(() => NewsArticlePayloadItem, (payloadItem) => payloadItem.article)
+  payloadItems: NewsArticlePayloadItem[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
