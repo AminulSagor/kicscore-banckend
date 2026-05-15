@@ -7,10 +7,11 @@ import { User } from './entities/user.entity';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { AwsModule } from '../aws/aws.module';
+import { UserSetting } from './entities/user-setting.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, UserProfile, FileEntity]),
+    TypeOrmModule.forFeature([User, UserProfile, FileEntity, UserSetting]),
     AwsModule,
   ],
   controllers: [UsersController],

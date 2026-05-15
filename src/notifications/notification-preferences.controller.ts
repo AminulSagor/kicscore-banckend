@@ -19,6 +19,7 @@ import { UpdateNotificationPreferenceDto } from './dto/update-notification-prefe
 import { EntityNotificationSetting } from './entities/entity-notification-setting.entity';
 import { NotificationPreference } from './entities/notification-preference.entity';
 import { NotificationPreferencesService } from './notification-preferences.service';
+import { UpdateMatchAlertsDto } from './dto/update-match-alerts.dto';
 
 interface RequestWithOptionalUser {
   user?: JwtPayload;
@@ -98,6 +99,27 @@ export class NotificationPreferencesController {
 
     return {
       message: 'Entity notification setting updated successfully',
+      data,
+    };
+  }
+
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Patch('preferences/match-alerts')
+  async updateMatchAlerts(
+    @Body() dto: UpdateMatchAlertsDto,
+    @Req() request: RequestWithOptionalUser,
+  ): Promise<ControllerResponse<NotificationPreference>> {
+    const data = await this.notificationPreferencesService.updatePreference(
+      {
+        installationId: dto.installationId,
+        matchAlertsEnabled: dto.matchAlertsEnabled,
+      },
+      request.user ?? null,
+    );
+
+    return {
+      message: 'Match alerts preference updated successfully',
       data,
     };
   }

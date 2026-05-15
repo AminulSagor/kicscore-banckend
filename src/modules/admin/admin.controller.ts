@@ -22,6 +22,7 @@ import { CreateAdminProfileDto } from './dto/create-admin-profile.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { ChangePasswordDto } from '../users/dto/change-password.dto';
 
 @Controller('admin')
 export class AdminController {
@@ -169,6 +170,19 @@ export class AdminController {
 
     return {
       message: 'Admin profile deleted successfully',
+      data,
+    };
+  }
+
+  @Patch('profile/me/password')
+  async changeMyAdminPassword(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<ControllerResponse<null>> {
+    const data = await this.adminService.changeMyAdminPassword(user.sub, dto);
+
+    return {
+      message: 'Admin password changed successfully',
       data,
     };
   }
