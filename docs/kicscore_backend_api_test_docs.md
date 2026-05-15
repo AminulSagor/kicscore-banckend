@@ -9,6 +9,10 @@ This document matches the current backend controllers:
 - `FootballController` under `/football`
 - `DeviceTokensController` under `/device-tokens`
 - `FollowsController` under `/follows`
+- `NotificationsController` under `/notifications`
+- `NotificationPreferencesController` under `/notifications`
+- `AdminController` under `/admin`
+- `TheNewsController` under `/news`
 
 The S3 flow is private-bucket based:
 
@@ -73,6 +77,12 @@ followEntityType=TEAM
 followEntityId={{teamId}}
 followEntityName=Manchester United
 followEntityLogo=https://media.api-sports.io/football/teams/33.png
+notificationId=00000000-0000-0000-0000-000000000000
+notificationPage=1
+notificationLimit=20
+notificationIsRead=false
+quietHoursStart=23:00
+quietHoursEnd=07:00
 ```
 
 For development OTP bypass, backend `.env` can be:
@@ -956,6 +966,12 @@ followEntityType=TEAM
 followEntityId={{teamId}}
 followEntityName=Manchester United
 followEntityLogo=https://media.api-sports.io/football/teams/33.png
+notificationId=00000000-0000-0000-0000-000000000000
+notificationPage=1
+notificationLimit=20
+notificationIsRead=false
+quietHoursStart=23:00
+quietHoursEnd=07:00
 ```
 
 ---
@@ -2473,30 +2489,920 @@ Check Redis Health / Health Checker
 
 Avoid running `Delete Account` or `Delete File` until the end.
 
----
-
-# 15. Current Remaining Backend Work
-
-These are not part of the current football cached gateway yet:
+For notification testing, use this order:
 
 ```txt
-News API integration
-News entity mapping to team/player/league
-Notification preferences
-Notification inbox
-Notification workers
-Delivery tracking and invalid FCM token cleanup
-Admin/test send notification API
+05 Device Tokens / Anonymous / Register Device Token - Anonymous
+06 Follows / Anonymous / Follow Entity - Anonymous
+07 Notifications / Anonymous / Get Notification Preferences - Anonymous
+07 Notifications / Anonymous / Update Notification Preferences - Anonymous
+07 Notifications / Anonymous / Get Entity Notification Setting - Anonymous
+07 Notifications / Anonymous / Update Entity Notification Setting - Anonymous
+07 Notifications / Anonymous / Get Notifications Inbox - Anonymous
+
+01 Auth / Login
+05 Device Tokens / Registered / Register Device Token - Registered
+06 Follows / Registered / Follow Entity - Registered
+07 Notifications / Registered / Get Notification Preferences - Registered
+07 Notifications / Registered / Update Notification Preferences - Registered
+07 Notifications / Registered / Get Entity Notification Setting - Registered
+07 Notifications / Registered / Update Entity Notification Setting - Registered
+07 Notifications / Registered / Get Notifications Inbox - Registered
 ```
 
-Priority for notification dependency:
+
+---
+
+---
+
+# 15. Notification Preferences + Inbox APIs
+
+These APIs support both anonymous/unregistered users and registered users.
 
 ```txt
-1. /football/fixtures/live
-2. /football/fixtures/:fixtureId
-3. /football/fixtures/:fixtureId/events
-4. /football/fixtures/:fixtureId/lineups
-5. /football/transfers
-6. /football/injuries
-7. News API cached service
+Anonymous / unregistered user = use installationId
+Registered user = use Authorization: Bearer {{accessToken}}
+```
+
+The current controllers are:
+
+```txt
+NotificationPreferencesController under /notifications
+NotificationsController under /notifications
+```
+
+---
+
+## 15.1 Anonymous Get Notification Preferences
+
+```http
+GET {{baseUrl}}/notifications/preferences?installationId={{installationId}}
+```
+
+Use this to fetch or create global notification preferences for an anonymous installation.
+
+Expected response data contains fields like:
+
+```json
+{
+  "id": "uuid",
+  "userId": null,
+  "installationId": "postman-installation-001",
+  "pushEnabled": true,
+  "inAppEnabled": true,
+  "matchAlertsEnabled": true,
+  "teamAlertsEnabled": true,
+  "leagueAlertsEnabled": true,
+  "playerAlertsEnabled": true,
+  "newsEnabled": false,
+  "dailyDigestEnabled": false,
+  "weeklyDigestEnabled": false,
+  "quietHoursEnabled": false,
+  "quietHoursStart": null,
+  "quietHoursEnd": null,
+  "timezone": null
+}
+```
+
+---
+
+## 15.2 Registered Get Notification Preferences
+
+```http
+GET {{baseUrl}}/notifications/preferences
+Authorization: Bearer {{accessToken}}
+```
+
+Use this to fetch or create global notification preferences for the logged-in user.
+
+---
+
+## 15.3 Anonymous Update Notification Preferences
+
+```http
+PATCH {{baseUrl}}/notifications/preferences
+```
+
+Body:
+
+```json
+{
+  "installationId": "{{installationId}}",
+  "pushEnabled": true,
+  "inAppEnabled": true,
+  "matchAlertsEnabled": true,
+  "teamAlertsEnabled": true,
+  "leagueAlertsEnabled": true,
+  "playerAlertsEnabled": true,
+  "newsEnabled": false,
+  "dailyDigestEnabled": false,
+  "weeklyDigestEnabled": false,
+  "quietHoursEnabled": true,
+  "quietHoursStart": "{{quietHoursStart}}",
+  "quietHoursEnd": "{{quietHoursEnd}}",
+  "timezone": "{{deviceTimezone}}"
+}
+```
+
+---
+
+## 15.4 Registered Update Notification Preferences
+
+```http
+PATCH {{baseUrl}}/notifications/preferences
+Authorization: Bearer {{accessToken}}
+```
+
+Body:
+
+```json
+{
+  "pushEnabled": true,
+  "inAppEnabled": true,
+  "matchAlertsEnabled": true,
+  "teamAlertsEnabled": true,
+  "leagueAlertsEnabled": true,
+  "playerAlertsEnabled": true,
+  "newsEnabled": false,
+  "dailyDigestEnabled": false,
+  "weeklyDigestEnabled": false,
+  "quietHoursEnabled": true,
+  "quietHoursStart": "{{quietHoursStart}}",
+  "quietHoursEnd": "{{quietHoursEnd}}",
+  "timezone": "{{deviceTimezone}}"
+}
+```
+
+---
+
+## 15.5 Anonymous Get Entity Notification Setting
+
+```http
+GET {{baseUrl}}/notifications/entity-settings?entityType={{followEntityType}}&entityId={{followEntityId}}&installationId={{installationId}}
+```
+
+Use this for per-entity settings, such as a specific team, player, league, fixture, or coach.
+
+---
+
+## 15.6 Registered Get Entity Notification Setting
+
+```http
+GET {{baseUrl}}/notifications/entity-settings?entityType={{followEntityType}}&entityId={{followEntityId}}
+Authorization: Bearer {{accessToken}}
+```
+
+---
+
+## 15.7 Anonymous Update Entity Notification Setting
+
+```http
+PATCH {{baseUrl}}/notifications/entity-settings
+```
+
+Body:
+
+```json
+{
+  "installationId": "{{installationId}}",
+  "entityType": "{{followEntityType}}",
+  "entityId": "{{followEntityId}}",
+  "notificationsEnabled": true,
+  "kickoffEnabled": true,
+  "matchStartedEnabled": true,
+  "goalEnabled": true,
+  "redCardEnabled": true,
+  "halfTimeEnabled": false,
+  "fullTimeEnabled": true,
+  "lineupEnabled": true,
+  "transferEnabled": true,
+  "injuryEnabled": false,
+  "newsEnabled": false
+}
+```
+
+---
+
+## 15.8 Registered Update Entity Notification Setting
+
+```http
+PATCH {{baseUrl}}/notifications/entity-settings
+Authorization: Bearer {{accessToken}}
+```
+
+Body:
+
+```json
+{
+  "entityType": "{{followEntityType}}",
+  "entityId": "{{followEntityId}}",
+  "notificationsEnabled": true,
+  "kickoffEnabled": true,
+  "matchStartedEnabled": true,
+  "goalEnabled": true,
+  "redCardEnabled": true,
+  "halfTimeEnabled": false,
+  "fullTimeEnabled": true,
+  "lineupEnabled": true,
+  "transferEnabled": true,
+  "injuryEnabled": false,
+  "newsEnabled": false
+}
+```
+
+---
+
+## 15.9 Anonymous Notification Inbox
+
+```http
+GET {{baseUrl}}/notifications?installationId={{installationId}}&page={{notificationPage}}&limit={{notificationLimit}}
+```
+
+Filter unread only:
+
+```http
+GET {{baseUrl}}/notifications?installationId={{installationId}}&page={{notificationPage}}&limit={{notificationLimit}}&isRead=false
+```
+
+Expected response data:
+
+```json
+{
+  "items": [],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 0,
+    "totalPages": 0
+  }
+}
+```
+
+---
+
+## 15.10 Registered Notification Inbox
+
+```http
+GET {{baseUrl}}/notifications?page={{notificationPage}}&limit={{notificationLimit}}
+Authorization: Bearer {{accessToken}}
+```
+
+Filter unread only:
+
+```http
+GET {{baseUrl}}/notifications?page={{notificationPage}}&limit={{notificationLimit}}&isRead=false
+Authorization: Bearer {{accessToken}}
+```
+
+---
+
+## 15.11 Anonymous Mark Notification As Read
+
+```http
+PATCH {{baseUrl}}/notifications/{{notificationId}}/read?installationId={{installationId}}
+```
+
+---
+
+## 15.12 Registered Mark Notification As Read
+
+```http
+PATCH {{baseUrl}}/notifications/{{notificationId}}/read
+Authorization: Bearer {{accessToken}}
+```
+
+---
+
+## 15.13 Anonymous Mark All Notifications As Read
+
+```http
+PATCH {{baseUrl}}/notifications/read-all?installationId={{installationId}}
+```
+
+Expected response data:
+
+```json
+{
+  "updatedCount": 0
+}
+```
+
+---
+
+## 15.14 Registered Mark All Notifications As Read
+
+```http
+PATCH {{baseUrl}}/notifications/read-all
+Authorization: Bearer {{accessToken}}
+```
+
+---
+
+## 15.15 Testing Notes
+
+For anonymous requests, always send:
+
+```txt
+installationId={{installationId}}
+```
+
+For registered requests, use:
+
+```http
+Authorization: Bearer {{accessToken}}
+```
+
+If a registered request also sends `installationId`, backend should prefer `userId` from the token.
+
+---
+
+
+
+# 16. Admin Panel APIs
+
+All `/admin` APIs require:
+
+```http
+Authorization: Bearer {{accessToken}}
+```
+
+The authenticated user must be an active admin:
+
+```txt
+role = ADMIN
+status = ACTIVE
+```
+
+The admin profile APIs use the existing `users` and `user_profiles` tables. There is no separate admin profile table.
+
+## 16.1 Admin Postman Variables
+
+```txt
+adminPage=1
+adminLimit=10
+adminSearch=
+adminUserStatusFilter=
+adminUserStatus=SUSPENDED
+adminUserId=00000000-0000-0000-0000-000000000000
+adminProfileFullName=Kicscore Admin
+adminProfilePhotoFileId=
+adminExportFormat=csv
+```
+
+## 16.2 Dashboard Overview
+
+```http
+GET {{baseUrl}}/admin/dashboard/overview
+```
+
+Purpose:
+
+```txt
+Total users
+Active today
+Pending verification users
+Suspended users
+Total follows
+Total followed teams
+Total followed leagues
+```
+
+Expected response shape:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Dashboard overview fetched successfully",
+  "data": {
+    "totalUsers": 14205,
+    "activeToday": 3402,
+    "pendingVerificationUsers": 12,
+    "suspendedUsers": 5,
+    "totalFollows": 10000,
+    "totalFollowedTeams": 3000,
+    "totalFollowedLeagues": 500
+  }
+}
+```
+
+## 16.3 Top Followed Leagues
+
+```http
+GET {{baseUrl}}/admin/dashboard/top-leagues?page={{adminPage}}&limit={{adminLimit}}
+```
+
+Returns paginated top followed leagues from the follows table.
+
+## 16.4 Top Followed Teams
+
+```http
+GET {{baseUrl}}/admin/dashboard/top-teams?page={{adminPage}}&limit={{adminLimit}}
+```
+
+Returns paginated top followed teams from the follows table.
+
+## 16.5 Export Dashboard Report
+
+```http
+GET {{baseUrl}}/admin/dashboard/export?format={{adminExportFormat}}
+```
+
+Expected response:
+
+```txt
+text/csv attachment
+```
+
+Postman note:
+
+```txt
+Use Send and Download if you want to save the CSV file.
+```
+
+## 16.6 Users List
+
+```http
+GET {{baseUrl}}/admin/users?page={{adminPage}}&limit={{adminLimit}}&search={{adminSearch}}&status={{adminUserStatusFilter}}
+```
+
+Supported `status` values:
+
+```txt
+PENDING_VERIFICATION
+ACTIVE
+SUSPENDED
+DELETED
+```
+
+Purpose:
+
+```txt
+Paginated user list with profile relation.
+Search works on email and profile full name.
+```
+
+## 16.7 Update User Status
+
+```http
+PATCH {{baseUrl}}/admin/users/{{adminUserId}}/status
+```
+
+Body:
+
+```json
+{
+  "status": "{{adminUserStatus}}"
+}
+```
+
+Allowed status values:
+
+```txt
+ACTIVE
+SUSPENDED
+```
+
+Important:
+
+```txt
+The admin cannot change their own status.
+Admin users cannot be suspended from this endpoint.
+```
+
+## 16.8 Delete User
+
+```http
+DELETE {{baseUrl}}/admin/users/{{adminUserId}}
+```
+
+Backend behavior:
+
+```txt
+Sets status = DELETED
+Anonymizes email
+Clears emailVerifiedAt and lastLoginAt
+Uses soft delete
+```
+
+Important:
+
+```txt
+The admin cannot delete their own account here.
+Admin users cannot be deleted from this endpoint.
+```
+
+## 16.9 Create Admin Profile
+
+```http
+POST {{baseUrl}}/admin/profile
+```
+
+Body:
+
+```json
+{
+  "fullName": "{{adminProfileFullName}}"
+}
+```
+
+Optional:
+
+```json
+{
+  "fullName": "{{adminProfileFullName}}",
+  "profilePhotoFileId": "{{adminProfilePhotoFileId}}"
+}
+```
+
+Creates the current admin profile in the existing `user_profiles` table if missing.
+
+## 16.10 Get Current Admin Profile
+
+```http
+GET {{baseUrl}}/admin/profile/me
+```
+
+Returns the current admin user with profile relation.
+
+## 16.11 Update Current Admin Profile
+
+```http
+PATCH {{baseUrl}}/admin/profile/me
+```
+
+Body:
+
+```json
+{
+  "fullName": "{{adminProfileFullName}}"
+}
+```
+
+Optional `profilePhotoFileId` can be included when a confirmed uploaded file is available.
+
+## 16.12 Delete Current Admin Profile
+
+```http
+DELETE {{baseUrl}}/admin/profile/me
+```
+
+Deletes the current admin's `user_profiles` row only. It does not delete the admin user.
+
+---
+
+# 17. Notification Workers: How They Work and How to Test
+
+All football notification workers must reuse backend services. They must not call API-Football directly.
+
+```txt
+Worker
+  ↓
+FootballService / TheNewsService
+  ↓
+Redis cache only for API-Football
+  ↓
+PostgreSQL snapshots
+  ↓
+Follows table
+  ↓
+Notification event + inbox
+  ↓
+FCM delivery attempt
+```
+
+News workers use PostgreSQL only for news storage/comparison.
+
+## 17.1 Live Fixture Worker
+
+Env:
+
+```env
+GOAL_NOTIFICATION_WORKER_ENABLED=false
+GOAL_NOTIFICATION_WORKER_INTERVAL_MS=30000
+```
+
+Handles:
+
+```txt
+Goal
+Match started
+Half-time
+Full-time
+Yellow card
+Red card
+Second yellow card
+```
+
+Data source:
+
+```txt
+FootballService.getLiveFixtures()
+/fixtures?live=all
+Redis key: api-football:fixtures:live:all
+```
+
+API call count:
+
+```txt
+30 sec interval = up to 2,880 calls/day
+One API response covers all live matches and all users.
+```
+
+How to test:
+
+```txt
+1. Set GOAL_NOTIFICATION_WORKER_ENABLED=true.
+2. Follow a live TEAM, FIXTURE, or LEAGUE.
+3. Wait for a live event, or adjust a snapshot manually in dev.
+4. Check GET /notifications?installationId={{installationId}}.
+5. Verify the same event does not create duplicate inbox rows.
+```
+
+Useful SQL:
+
+```sql
+SELECT *
+FROM football_fixture_notification_snapshots
+ORDER BY updated_at DESC;
+
+SELECT *
+FROM football_fixture_event_notification_snapshots
+ORDER BY created_at DESC;
+```
+
+## 17.2 Starting XI Worker
+
+Env:
+
+```env
+LINEUP_NOTIFICATION_WORKER_ENABLED=true
+LINEUP_NOTIFICATION_WORKER_INTERVAL_MS=600000
+LINEUP_NOTIFICATION_LOOKAHEAD_MINUTES=90
+LINEUP_NOTIFICATION_TIMEZONE=Asia/Dhaka
+```
+
+Rules:
+
+```txt
+Only checks followed upcoming fixtures within the lookahead window.
+Does not check all matches.
+Sends notification only when lineups first become available.
+```
+
+Data sources:
+
+```txt
+/fixtures?date=YYYY-MM-DD&timezone=Asia/Dhaka
+/fixtures/lineups?fixture=FIXTURE_ID
+```
+
+How to test:
+
+```txt
+1. Follow an upcoming fixture/team/league.
+2. Make sure kickoff is inside LINEUP_NOTIFICATION_LOOKAHEAD_MINUTES.
+3. Call GET /football/fixtures/:fixtureId/lineups manually.
+4. If response has lineups, worker should notify once.
+5. If response is empty, worker only updates snapshot and waits.
+```
+
+Useful SQL:
+
+```sql
+SELECT *
+FROM football_lineup_notification_snapshots
+ORDER BY updated_at DESC;
+```
+
+## 17.3 Transfer Worker
+
+Env:
+
+```env
+TRANSFER_NOTIFICATION_WORKER_ENABLED=false
+TRANSFER_NOTIFICATION_WORKER_INTERVAL_MS=86400000
+```
+
+Rules:
+
+```txt
+Checks once per unique followed team/player.
+First run stores snapshots only.
+Later new transfer rows create notifications.
+```
+
+Data sources:
+
+```txt
+/transfers?team=TEAM_ID
+/transfers?player=PLAYER_ID
+```
+
+How to test:
+
+```txt
+1. Follow a TEAM or PLAYER.
+2. Temporarily set TRANSFER_NOTIFICATION_WORKER_ENABLED=true.
+3. For quick testing, set TRANSFER_NOTIFICATION_WORKER_INTERVAL_MS=60000.
+4. First run should create target scan and snapshots only.
+5. Delete one snapshot in dev to force notification on next run.
+6. Check GET /notifications?installationId={{installationId}}.
+```
+
+Useful SQL:
+
+```sql
+SELECT *
+FROM football_transfer_target_scans
+ORDER BY updated_at DESC;
+
+SELECT *
+FROM football_transfer_notification_snapshots
+ORDER BY created_at DESC;
+```
+
+## 17.4 Injury Worker
+
+Env:
+
+```env
+INJURY_NOTIFICATION_WORKER_ENABLED=false
+INJURY_NOTIFICATION_WORKER_INTERVAL_MS=86400000
+INJURY_NOTIFICATION_SEASON_OVERRIDE=
+```
+
+Rules:
+
+```txt
+Only checks TEAM and PLAYER follows.
+Does not notify fixture-only followers.
+First run stores snapshots only.
+Later new injury rows create notifications.
+```
+
+How to test:
+
+```txt
+1. Follow a TEAM or PLAYER.
+2. Enable worker temporarily.
+3. First run creates scans/snapshots only.
+4. Delete one snapshot in dev to force notification on next run.
+5. Check /notifications inbox.
+```
+
+Useful SQL:
+
+```sql
+SELECT *
+FROM football_injury_target_scans
+ORDER BY updated_at DESC;
+
+SELECT *
+FROM football_injury_notification_snapshots
+ORDER BY created_at DESC;
+```
+
+## 17.5 Table Change Worker
+
+Env:
+
+```env
+TABLE_CHANGE_NOTIFICATION_WORKER_ENABLED=false
+TABLE_CHANGE_NOTIFICATION_WORKER_INTERVAL_MS=21600000
+TABLE_CHANGE_NOTIFICATION_SEASON_OVERRIDE=
+```
+
+Rules:
+
+```txt
+Checks once per unique followed league/season.
+Team follows need metadata.leagueId to know which league table to check.
+First run stores snapshots only.
+Later rank/points/goalDiff changes create notifications.
+```
+
+Data source:
+
+```txt
+/standings?league=LEAGUE_ID&season=SEASON
+```
+
+How to test:
+
+```txt
+1. Follow a league with metadata season.
+2. Enable worker temporarily.
+3. First run creates standings target scan and team snapshots.
+4. Modify one row in football_standings_team_snapshots manually.
+5. Wait for next run.
+6. Check notification inbox.
+```
+
+Follow body example:
+
+```json
+{
+  "entityType": "LEAGUE",
+  "entityId": "39",
+  "installationId": "{{installationId}}",
+  "entityName": "Premier League",
+  "notificationEnabled": true,
+  "metadata": {
+    "season": "2025"
+  }
+}
+```
+
+Useful SQL:
+
+```sql
+SELECT *
+FROM football_standings_target_scans
+ORDER BY updated_at DESC;
+
+SELECT *
+FROM football_standings_team_snapshots
+ORDER BY updated_at DESC;
+```
+
+## 17.6 News / Digest Worker
+
+Env:
+
+```env
+THENEWS_NOTIFICATION_WORKER_ENABLED=false
+THENEWS_NOTIFICATION_CRON=0 * * * *
+THENEWS_NOTIFICATION_LIMIT=50
+```
+
+Rules:
+
+```txt
+TheNewsCronService syncs sports news.
+NewsNotificationWorker compares new articles against news_notification_snapshots.
+First run marks existing news as processed and avoids notification spam.
+Later new mapped articles notify matching followers.
+No Redis is used for news cache.
+```
+
+How to test:
+
+```txt
+1. Follow a team/player/league with entityName and aliases in metadata.
+2. Enable THENEWS_NOTIFICATION_WORKER_ENABLED=true.
+3. Run sports news sync.
+4. First run should create snapshots without notifications.
+5. Insert or sync a new matching article.
+6. Check GET /notifications?installationId={{installationId}}.
+```
+
+Useful SQL:
+
+```sql
+SELECT *
+FROM news_articles
+ORDER BY published_at DESC;
+
+SELECT *
+FROM news_article_mapped_entities
+ORDER BY created_at DESC;
+
+SELECT *
+FROM news_notification_snapshots
+ORDER BY created_at DESC;
+
+SELECT *
+FROM news_notification_worker_states;
+```
+
+---
+
+# 18. Recommended Admin Testing Order
+
+```txt
+1. Login as ADMIN and save accessToken.
+2. GET /admin/dashboard/overview.
+3. GET /admin/dashboard/top-leagues.
+4. GET /admin/dashboard/top-teams.
+5. GET /admin/users.
+6. PATCH /admin/users/:userId/status.
+7. POST /admin/profile.
+8. GET /admin/profile/me.
+9. PATCH /admin/profile/me.
+10. GET /admin/dashboard/export.
+```
+
+---
+
+# 19. Current Remaining Backend Work
+
+```txt
+Hydrated following endpoint for frontend cards
+Match day composite endpoint for Matches UI
+Popular in Bangladesh analytics
+Preference enforcement inside every worker/fanout
+Delivery retry worker
+Real FCM token test after frontend integrates FCM
+News/digest production tuning
 ```

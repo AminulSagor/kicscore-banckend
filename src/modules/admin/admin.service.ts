@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   StreamableFile,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Readable } from 'stream';
@@ -18,6 +21,7 @@ import { AdminUsersQueryDto } from './dto/admin-users-query.dto';
 import { CreateAdminProfileDto } from './dto/create-admin-profile.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AdminService {
@@ -313,29 +317,66 @@ export class AdminService {
     return null;
   }
 
-  async createMyAdminProfile(
-    userId: string,
+  async createAdminUser(
     dto: CreateAdminProfileDto,
-  ): Promise<UserProfile> {
-    const adminUser = await this.getActiveAdminUser(userId);
+    providedSecret?: string,
+  ): Promise<{
+    id: string;
+    email: string;
+    role: UserRole;
+    status: UserStatus;
+    profile: UserProfile;
+  }> {
+    const enabled = process.env.ADMIN_CREATE_ENABLED === 'true';
+    const expectedSecret = process.env.ADMIN_CREATE_SECRET;
 
-    const existingProfile = await this.userProfileRepository.findOne({
-      where: {
-        userId: adminUser.id,
-      },
-    });
-
-    if (existingProfile) {
-      throw new BadRequestException('Admin profile already exists');
+    if (!enabled) {
+      throw new ForbiddenException('Admin creation is disabled');
     }
 
+    if (!expectedSecret || providedSecret !== expectedSecret) {
+      throw new UnauthorizedException('Invalid admin creation secret');
+    }
+
+    const existingUser = await this.userRepository.findOne({
+      where: {
+        email: dto.email.toLowerCase(),
+      },
+      withDeleted: true,
+    });
+
+    if (existingUser) {
+      throw new ConflictException('User with this email already exists');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    const user = this.userRepository.create({
+      email: dto.email.toLowerCase(),
+      passwordHash,
+      role: UserRole.ADMIN,
+      status: UserStatus.ACTIVE,
+      emailVerifiedAt: new Date(),
+      lastLoginAt: null,
+    });
+
+    const savedUser = await this.userRepository.save(user);
+
     const profile = this.userProfileRepository.create({
-      userId: adminUser.id,
+      userId: savedUser.id,
       fullName: dto.fullName,
       profilePhotoFileId: dto.profilePhotoFileId ?? null,
     });
 
-    return this.userProfileRepository.save(profile);
+    const savedProfile = await this.userProfileRepository.save(profile);
+
+    return {
+      id: savedUser.id,
+      email: savedUser.email,
+      role: savedUser.role,
+      status: savedUser.status,
+      profile: savedProfile,
+    };
   }
 
   async getMyAdminProfile(userId: string): Promise<User> {

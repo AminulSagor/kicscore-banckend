@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -12,6 +13,8 @@ import {
 
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { ControllerResponse } from 'src/common/interfaces/api-response.interface';
+import { Public } from 'src/common/decorators/public.decorator';
+
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AdminService } from './admin.service';
 import { AdminUsersQueryDto } from './dto/admin-users-query.dto';
@@ -20,11 +23,11 @@ import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { AdminGuard } from '../auth/guards/admin.guard';
 
-@UseGuards(AdminGuard)
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
+  @UseGuards(AdminGuard)
   @Get('dashboard/overview')
   async getDashboardOverview(): Promise<ControllerResponse<unknown>> {
     const data = await this.adminService.getDashboardOverview();
@@ -35,6 +38,7 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Get('dashboard/top-leagues')
   async getTopLeagues(
     @Query('page') page?: string,
@@ -48,6 +52,7 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Get('dashboard/top-teams')
   async getTopTeams(
     @Query('page') page?: string,
@@ -61,11 +66,13 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Get('dashboard/export')
   exportDashboardReport() {
     return this.adminService.exportDashboardReport();
   }
 
+  @UseGuards(AdminGuard)
   @Get('users')
   async getUsers(
     @Query() query: AdminUsersQueryDto,
@@ -78,6 +85,7 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Patch('users/:userId/status')
   async updateUserStatus(
     @CurrentUser() adminUser: JwtPayload,
@@ -96,6 +104,7 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Delete('users/:userId')
   async deleteUser(
     @CurrentUser() adminUser: JwtPayload,
@@ -109,19 +118,22 @@ export class AdminController {
     };
   }
 
+  // Temporary admin seeder API
+  @Public()
   @Post('profile')
   async createAdminProfile(
-    @CurrentUser() user: JwtPayload,
+    @Headers('x-admin-create-secret') secret: string | undefined,
     @Body() dto: CreateAdminProfileDto,
   ): Promise<ControllerResponse<unknown>> {
-    const data = await this.adminService.createMyAdminProfile(user.sub, dto);
+    const data = await this.adminService.createAdminUser(dto, secret);
 
     return {
-      message: 'Admin profile created successfully',
+      message: 'Admin user created successfully',
       data,
     };
   }
 
+  @UseGuards(AdminGuard)
   @Get('profile/me')
   async getMyAdminProfile(
     @CurrentUser() user: JwtPayload,
@@ -134,6 +146,7 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Patch('profile/me')
   async updateMyAdminProfile(
     @CurrentUser() user: JwtPayload,
@@ -147,6 +160,7 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Delete('profile/me')
   async deleteMyAdminProfile(
     @CurrentUser() user: JwtPayload,
