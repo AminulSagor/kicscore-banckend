@@ -17,6 +17,11 @@ import { User } from './entities/user.entity';
 import { UserStatus } from './enums/user-status.enum';
 import { FileStatus } from '../files/enums/file-status.enum';
 import { S3Service } from '../aws/s3.service';
+import { UserSetting } from './entities/user-setting.entity';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { compareHash, hashValue } from 'src/common/utils/password.util';
+import { UpdateUserSettingsDto } from './dto/update-user-settings.dto';
+import { UnitSystem } from 'src/common/utils/unit-system.enum';
 
 @Injectable()
 export class UsersService {
@@ -32,6 +37,9 @@ export class UsersService {
 
     @InjectRepository(FileEntity)
     private readonly fileRepository: Repository<FileEntity>,
+
+    @InjectRepository(UserSetting)
+    private readonly userSettingRepository: Repository<UserSetting>,
   ) {}
 
   async getMe(userId: string): Promise<unknown> {
@@ -168,5 +176,82 @@ export class UsersService {
 
   private normalizeName(name: string): string {
     return name.trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
+  async changeMyPassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<null> {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException(
+        'New password and confirm password do not match',
+      );
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException(
+        'New password must be different from current password',
+      );
+    }
+
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.id = :userId', { userId })
+      .andWhere('user.status = :status', { status: UserStatus.ACTIVE })
+      .getOne();
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const passwordMatched = await compareHash(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!passwordMatched) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    user.passwordHash = await hashValue(dto.newPassword);
+
+    await this.userRepository.save(user);
+
+    return null;
+  }
+
+  async getMySettings(userId: string): Promise<UserSetting> {
+    return this.getOrCreateSettings(userId);
+  }
+
+  async updateMySettings(
+    userId: string,
+    dto: UpdateUserSettingsDto,
+  ): Promise<UserSetting> {
+    const settings = await this.getOrCreateSettings(userId);
+
+    settings.unitSystem = dto.unitSystem ?? settings.unitSystem;
+
+    return this.userSettingRepository.save(settings);
+  }
+
+  private async getOrCreateSettings(userId: string): Promise<UserSetting> {
+    const existingSettings = await this.userSettingRepository.findOne({
+      where: {
+        userId,
+      },
+    });
+
+    if (existingSettings) {
+      return existingSettings;
+    }
+
+    const settings = this.userSettingRepository.create({
+      userId,
+      unitSystem: UnitSystem.METRIC,
+    });
+
+    return this.userSettingRepository.save(settings);
   }
 }

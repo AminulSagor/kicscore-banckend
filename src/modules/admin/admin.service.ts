@@ -22,6 +22,8 @@ import { CreateAdminProfileDto } from './dto/create-admin-profile.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import * as bcrypt from 'bcrypt';
+import { ChangePasswordDto } from '../users/dto/change-password.dto';
+import { compareHash, hashValue } from 'src/common/utils/password.util';
 
 @Injectable()
 export class AdminService {
@@ -502,5 +504,49 @@ export class AdminService {
     }
 
     return parsed;
+  }
+
+  async changeMyAdminPassword(
+    adminUserId: string,
+    dto: ChangePasswordDto,
+  ): Promise<null> {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException(
+        'New password and confirm password do not match',
+      );
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException(
+        'New password must be different from current password',
+      );
+    }
+
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.id = :adminUserId', { adminUserId })
+      .andWhere('user.role = :role', { role: UserRole.ADMIN })
+      .andWhere('user.status = :status', { status: UserStatus.ACTIVE })
+      .getOne();
+
+    if (!user) {
+      throw new NotFoundException('Admin user not found');
+    }
+
+    const passwordMatched = await compareHash(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!passwordMatched) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    user.passwordHash = await hashValue(dto.newPassword);
+
+    await this.userRepository.save(user);
+
+    return null;
   }
 }
