@@ -256,7 +256,7 @@ export class FootballService {
     };
   }> {
     const page = this.toPositiveNumber(query.page, 1);
-    const limit = Math.min(this.toPositiveNumber(query.limit, 10), 1000);
+    const limit = Math.min(this.toPositiveNumber(query.limit, 10), 100);
     const timezone = query.timezone ?? 'Asia/Dhaka';
 
     const fixturesResponse = (await this.getFixtures({
