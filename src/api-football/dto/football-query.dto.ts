@@ -150,7 +150,6 @@ export class FootballQueryDto {
   current?: string;
 
   @IsOptional()
-  @Transform(trimString)
   @IsString()
   @MaxLength(100)
   search?: string;
