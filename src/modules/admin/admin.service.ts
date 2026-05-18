@@ -11,19 +11,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Readable } from 'stream';
 import { Repository } from 'typeorm';
 
+import { compareHash, hashValue } from 'src/common/utils/password.util';
 import { Follow } from '../follows/entities/follow.entity';
 import { FollowEntityType } from '../follows/enums/follow-entity-type.enum';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/enums/user-role.enum';
 import { UserStatus } from '../users/enums/user-status.enum';
+import { ChangePasswordDto } from '../users/dto/change-password.dto';
 import { AdminUsersQueryDto } from './dto/admin-users-query.dto';
 import { CreateAdminProfileDto } from './dto/create-admin-profile.dto';
 import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
-import * as bcrypt from 'bcrypt';
-import { ChangePasswordDto } from '../users/dto/change-password.dto';
-import { compareHash, hashValue } from 'src/common/utils/password.util';
 
 @Injectable()
 export class AdminService {
@@ -61,24 +60,37 @@ export class AdminService {
     ] = await Promise.all([
       this.userRepository.count({
         where: {
+          role: UserRole.USER,
           status: UserStatus.ACTIVE,
         },
       }),
 
       this.userRepository
-        .createQueryBuilder('user')
-        .where('user.last_login_at >= :todayStart', { todayStart })
-        .andWhere('user.status = :status', { status: UserStatus.ACTIVE })
-        .getCount(),
+        .count({
+          where: {
+            role: UserRole.USER,
+            status: UserStatus.ACTIVE,
+          },
+        })
+        .then(async () => {
+          return this.userRepository
+            .createQueryBuilder('appUser')
+            .where('appUser.role = :role', { role: UserRole.USER })
+            .andWhere('appUser.status = :status', { status: UserStatus.ACTIVE })
+            .andWhere('appUser.lastLoginAt >= :todayStart', { todayStart })
+            .getCount();
+        }),
 
       this.userRepository.count({
         where: {
+          role: UserRole.USER,
           status: UserStatus.PENDING_VERIFICATION,
         },
       }),
 
       this.userRepository.count({
         where: {
+          role: UserRole.USER,
           status: UserStatus.SUSPENDED,
         },
       }),
@@ -89,21 +101,19 @@ export class AdminService {
         },
       }),
 
-      this.followRepository
-        .createQueryBuilder('follow')
-        .where('follow.is_active = true')
-        .andWhere('follow.entity_type = :entityType', {
+      this.followRepository.count({
+        where: {
+          isActive: true,
           entityType: FollowEntityType.TEAM,
-        })
-        .getCount(),
+        },
+      }),
 
-      this.followRepository
-        .createQueryBuilder('follow')
-        .where('follow.is_active = true')
-        .andWhere('follow.entity_type = :entityType', {
+      this.followRepository.count({
+        where: {
+          isActive: true,
           entityType: FollowEntityType.LEAGUE,
-        })
-        .getCount(),
+        },
+      }),
     ]);
 
     return {
@@ -137,53 +147,66 @@ export class AdminService {
   }> {
     const page = this.toPositiveNumber(params.page, 1);
     const limit = Math.min(this.toPositiveNumber(params.limit, 10), 50);
-    const offset = (page - 1) * limit;
+    const startIndex = (page - 1) * limit;
 
-    const totalResult = await this.followRepository
-      .createQueryBuilder('follow')
-      .where('follow.is_active = true')
-      .andWhere('follow.entity_type = :entityType', {
+    const follows = await this.followRepository.find({
+      where: {
+        isActive: true,
         entityType: params.entityType,
-      })
-      .select('COUNT(DISTINCT follow.entity_id)', 'total')
-      .getRawOne<{ total: string }>();
+      },
+      relations: {
+        entitySnapshot: true,
+      },
+    });
 
-    const total = Number(totalResult?.total ?? 0);
-
-    const rows = await this.followRepository
-      .createQueryBuilder('follow')
-      .leftJoin('follow.entitySnapshot', 'snapshot')
-      .where('follow.is_active = true')
-      .andWhere('follow.entity_type = :entityType', {
-        entityType: params.entityType,
-      })
-      .select('follow.entity_id', 'entityId')
-      .addSelect('MAX(snapshot.entity_name)', 'entityName')
-      .addSelect('MAX(snapshot.entity_logo)', 'entityLogo')
-      .addSelect('COUNT(follow.id)', 'followersCount')
-      .groupBy('follow.entity_id')
-      .orderBy('"followersCount"', 'DESC')
-      .offset(offset)
-      .limit(limit)
-      .getRawMany<{
+    const groupedMap = new Map<
+      string,
+      {
         entityId: string;
         entityName: string | null;
         entityLogo: string | null;
-        followersCount: string;
-      }>();
+        followersCount: number;
+      }
+    >();
+
+    for (const follow of follows) {
+      const existing = groupedMap.get(follow.entityId);
+
+      if (!existing) {
+        groupedMap.set(follow.entityId, {
+          entityId: follow.entityId,
+          entityName: follow.entitySnapshot?.entityName ?? null,
+          entityLogo: follow.entitySnapshot?.entityLogo ?? null,
+          followersCount: 1,
+        });
+
+        continue;
+      }
+
+      existing.followersCount += 1;
+
+      if (!existing.entityName && follow.entitySnapshot?.entityName) {
+        existing.entityName = follow.entitySnapshot.entityName;
+      }
+
+      if (!existing.entityLogo && follow.entitySnapshot?.entityLogo) {
+        existing.entityLogo = follow.entitySnapshot.entityLogo;
+      }
+    }
+
+    const sortedItems = Array.from(groupedMap.values()).sort((left, right) => {
+      return right.followersCount - left.followersCount;
+    });
+
+    const paginatedItems = sortedItems.slice(startIndex, startIndex + limit);
 
     return {
-      items: rows.map((row) => ({
-        entityId: row.entityId,
-        entityName: row.entityName,
-        entityLogo: row.entityLogo,
-        followersCount: Number(row.followersCount),
-      })),
+      items: paginatedItems,
       meta: {
         page,
         limit,
-        total,
-        totalPages: Math.ceil(total / limit),
+        total: sortedItems.length,
+        totalPages: Math.ceil(sortedItems.length / limit),
       },
     };
   }
@@ -217,19 +240,20 @@ export class AdminService {
     const limit = Math.min(this.toPositiveNumber(query.limit, 10), 50);
 
     const queryBuilder = this.userRepository
-      .createQueryBuilder('user')
-      .leftJoinAndSelect('user.profile', 'profile');
+      .createQueryBuilder('appUser')
+      .leftJoinAndSelect('appUser.profile', 'profile')
+      .where('appUser.role = :role', { role: UserRole.USER });
 
     if (query.status === UserStatus.DELETED) {
       queryBuilder.withDeleted();
-      queryBuilder.where('user.status = :status', {
+      queryBuilder.andWhere('appUser.status = :status', {
         status: UserStatus.DELETED,
       });
     } else {
-      queryBuilder.where('user.deleted_at IS NULL');
+      queryBuilder.andWhere('appUser.deletedAt IS NULL');
 
       if (query.status) {
-        queryBuilder.andWhere('user.status = :status', {
+        queryBuilder.andWhere('appUser.status = :status', {
           status: query.status,
         });
       }
@@ -237,7 +261,7 @@ export class AdminService {
 
     if (query.search) {
       queryBuilder.andWhere(
-        '(user.email ILIKE :search OR profile.full_name ILIKE :search)',
+        '(appUser.email ILIKE :search OR profile.fullName ILIKE :search)',
         {
           search: `%${query.search}%`,
         },
@@ -245,7 +269,7 @@ export class AdminService {
     }
 
     const [items, total] = await queryBuilder
-      .orderBy('user.created_at', 'DESC')
+      .orderBy('appUser.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
@@ -351,7 +375,7 @@ export class AdminService {
       throw new ConflictException('User with this email already exists');
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const passwordHash = await hashValue(dto.password);
 
     const user = this.userRepository.create({
       email: dto.email.toLowerCase(),
@@ -432,6 +456,50 @@ export class AdminService {
     return null;
   }
 
+  async changeMyAdminPassword(
+    adminUserId: string,
+    dto: ChangePasswordDto,
+  ): Promise<null> {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException(
+        'New password and confirm password do not match',
+      );
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException(
+        'New password must be different from current password',
+      );
+    }
+
+    const user = await this.userRepository
+      .createQueryBuilder('appUser')
+      .addSelect('appUser.passwordHash')
+      .where('appUser.id = :adminUserId', { adminUserId })
+      .andWhere('appUser.role = :role', { role: UserRole.ADMIN })
+      .andWhere('appUser.status = :status', { status: UserStatus.ACTIVE })
+      .getOne();
+
+    if (!user) {
+      throw new NotFoundException('Admin user not found');
+    }
+
+    const passwordMatched = await compareHash(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!passwordMatched) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    user.passwordHash = await hashValue(dto.newPassword);
+
+    await this.userRepository.save(user);
+
+    return null;
+  }
+
   async exportDashboardReport(): Promise<StreamableFile> {
     const overview = await this.getDashboardOverview();
     const leagues = await this.getTopFollowedLeagues('1', '10');
@@ -504,49 +572,5 @@ export class AdminService {
     }
 
     return parsed;
-  }
-
-  async changeMyAdminPassword(
-    adminUserId: string,
-    dto: ChangePasswordDto,
-  ): Promise<null> {
-    if (dto.newPassword !== dto.confirmPassword) {
-      throw new BadRequestException(
-        'New password and confirm password do not match',
-      );
-    }
-
-    if (dto.currentPassword === dto.newPassword) {
-      throw new BadRequestException(
-        'New password must be different from current password',
-      );
-    }
-
-    const user = await this.userRepository
-      .createQueryBuilder('user')
-      .addSelect('user.passwordHash')
-      .where('user.id = :adminUserId', { adminUserId })
-      .andWhere('user.role = :role', { role: UserRole.ADMIN })
-      .andWhere('user.status = :status', { status: UserStatus.ACTIVE })
-      .getOne();
-
-    if (!user) {
-      throw new NotFoundException('Admin user not found');
-    }
-
-    const passwordMatched = await compareHash(
-      dto.currentPassword,
-      user.passwordHash,
-    );
-
-    if (!passwordMatched) {
-      throw new BadRequestException('Current password is incorrect');
-    }
-
-    user.passwordHash = await hashValue(dto.newPassword);
-
-    await this.userRepository.save(user);
-
-    return null;
   }
 }

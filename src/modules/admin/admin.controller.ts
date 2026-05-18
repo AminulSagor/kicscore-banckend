@@ -174,6 +174,7 @@ export class AdminController {
     };
   }
 
+  @UseGuards(AdminGuard)
   @Patch('profile/me/password')
   async changeMyAdminPassword(
     @CurrentUser() user: JwtPayload,
