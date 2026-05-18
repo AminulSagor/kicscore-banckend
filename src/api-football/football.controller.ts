@@ -3,6 +3,7 @@ import { Public } from '../common/decorators/public.decorator';
 import { FootballService } from './football.service';
 import { SearchQueryDto } from './dto/football-filters.dto';
 import { FootballQueryDto } from './dto/football-query.dto';
+import { LeagueFixturesQueryDto } from './dto/league-fixtures-query.dto';
 
 @Public()
 @Controller('football')
@@ -67,6 +68,11 @@ export class FootballController {
     return this.footballService.getTeams(query);
   }
 
+  @Get('league')
+  getFixturesGroupedByLeague(@Query() query: LeagueFixturesQueryDto) {
+    return this.footballService.getFixturesGroupedByLeague(query);
+  }
+
   @Get('leagues')
   getLeagues(@Query() query: FootballQueryDto) {
     return this.footballService.getLeagues(query);
@@ -95,6 +101,11 @@ export class FootballController {
   @Get('players/top-assists')
   getTopAssists(@Query() query: FootballQueryDto) {
     return this.footballService.getTopAssists(query);
+  }
+
+  @Get('players/profiles')
+  getPlayerProfiles(@Query() query: FootballQueryDto) {
+    return this.footballService.getPlayerProfiles(query);
   }
 
   @Get('players')

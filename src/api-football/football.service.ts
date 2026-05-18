@@ -10,6 +10,11 @@ import { apiFootballCacheConfig } from 'src/config/api-football-cache.config';
 import { buildApiFootballCacheKey } from '../common/utils/api-football-cache-key.util';
 import { RedisService } from '../redis/redis.service';
 import { ApiFootballRequestPriority } from './enums/api-football-request-priority.enum';
+import { LeagueFixturesQueryDto } from './dto/league-fixtures-query.dto';
+import {
+  ApiFootballFixturesResponse,
+  LeagueFixturesGroup,
+} from 'src/common/interfaces/api-football-custom-response.interface';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
@@ -212,6 +217,121 @@ export class FootballService {
     );
   }
 
+  getPlayerProfiles(query: QueryParams): Promise<ApiFootballResponse> {
+    return this.cached(
+      '/players/profiles',
+      query,
+      apiFootballCacheConfig.search,
+    );
+  }
+
+  private toPositiveNumber(
+    value: string | undefined,
+    fallback: number,
+  ): number {
+    const parsedValue = Number(value);
+
+    if (!value || Number.isNaN(parsedValue) || parsedValue < 1) {
+      return fallback;
+    }
+
+    return parsedValue;
+  }
+
+  async getFixturesGroupedByLeague(query: {
+    date: string;
+    page?: string;
+    limit?: string;
+    timezone?: string;
+  }): Promise<{
+    date: string;
+    timezone: string;
+    items: LeagueFixturesGroup[];
+    meta: {
+      page: number;
+      limit: number;
+      totalLeagues: number;
+      totalPages: number;
+      totalMatches: number;
+    };
+  }> {
+    const page = this.toPositiveNumber(query.page, 1);
+    const limit = Math.min(this.toPositiveNumber(query.limit, 10), 1000);
+    const timezone = query.timezone ?? 'Asia/Dhaka';
+
+    const fixturesResponse = (await this.getFixtures({
+      date: query.date,
+      timezone,
+    })) as ApiFootballFixturesResponse;
+
+    const fixtures = fixturesResponse.response ?? [];
+    const groupedMap = new Map<number, LeagueFixturesGroup>();
+
+    for (const fixture of fixtures) {
+      const leagueId = fixture.league.id;
+
+      const existingGroup = groupedMap.get(leagueId);
+
+      if (!existingGroup) {
+        groupedMap.set(leagueId, {
+          league: {
+            id: fixture.league.id,
+            name: fixture.league.name,
+            country: fixture.league.country,
+            logo: fixture.league.logo,
+            flag: fixture.league.flag,
+            season: fixture.league.season,
+            round: fixture.league.round,
+            standings: fixture.league.standings,
+          },
+          matchCount: 1,
+          fixtures: [fixture],
+        });
+
+        continue;
+      }
+
+      existingGroup.matchCount += 1;
+      existingGroup.fixtures.push(fixture);
+    }
+
+    const groupedItems = Array.from(groupedMap.values())
+      .map((group) => ({
+        ...group,
+        fixtures: group.fixtures.sort((left, right) => {
+          return left.fixture.timestamp - right.fixture.timestamp;
+        }),
+      }))
+      .sort((left, right) => {
+        const leftFirstKickoff = left.fixtures[0]?.fixture.timestamp ?? 0;
+        const rightFirstKickoff = right.fixtures[0]?.fixture.timestamp ?? 0;
+
+        if (leftFirstKickoff !== rightFirstKickoff) {
+          return leftFirstKickoff - rightFirstKickoff;
+        }
+
+        return left.league.name.localeCompare(right.league.name);
+      });
+
+    const totalLeagues = groupedItems.length;
+    const totalMatches = fixtures.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedItems = groupedItems.slice(startIndex, startIndex + limit);
+
+    return {
+      date: query.date,
+      timezone,
+      items: paginatedItems,
+      meta: {
+        page,
+        limit,
+        totalLeagues,
+        totalPages: Math.ceil(totalLeagues / limit),
+        totalMatches,
+      },
+    };
+  }
+
   async searchAll(
     query: string,
     season: string,
@@ -232,8 +352,8 @@ export class FootballService {
       this.cached('/teams', { search }, apiFootballCacheConfig.search),
       this.cached('/leagues', { search }, apiFootballCacheConfig.search),
       this.cached(
-        '/players',
-        { search, season },
+        '/players/profiles',
+        { search },
         apiFootballCacheConfig.search,
       ),
     ]);
