@@ -13,6 +13,7 @@ import { ApiFootballRequestPriority } from './enums/api-football-request-priorit
 import { LeagueFixturesQueryDto } from './dto/league-fixtures-query.dto';
 import {
   ApiFootballFixturesResponse,
+  FixturesByTimeResponse,
   LeagueFixturesGroup,
 } from 'src/common/interfaces/api-football-custom-response.interface';
 
@@ -77,6 +78,48 @@ export class FootballService {
       { fixture: fixtureId },
       apiFootballCacheConfig.fixturesPast,
     );
+  }
+
+  async getFixturesByTime(query: {
+    date: string;
+    page?: string;
+    limit?: string;
+    timezone?: string;
+    statusGroup?: 'ALL' | 'LIVE' | 'UPCOMING' | 'FINISHED';
+  }): Promise<FixturesByTimeResponse> {
+    const page = this.toPositiveNumber(query.page, 1);
+    const limit = Math.min(this.toPositiveNumber(query.limit, 20), 100);
+    const timezone = query.timezone ?? 'Asia/Dhaka';
+
+    const fixturesResponse = (await this.getFixtures({
+      date: query.date,
+      timezone,
+    })) as ApiFootballFixturesResponse;
+
+    const filteredFixtures = this.filterFixturesByStatusGroup(
+      fixturesResponse.response ?? [],
+      query.statusGroup ?? 'ALL',
+    );
+
+    const sortedFixtures = filteredFixtures.sort((left, right) => {
+      return left.fixture.timestamp - right.fixture.timestamp;
+    });
+
+    const totalFixtures = sortedFixtures.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedItems = sortedFixtures.slice(startIndex, startIndex + limit);
+
+    return {
+      date: query.date,
+      timezone,
+      items: paginatedItems,
+      meta: {
+        page,
+        limit,
+        totalFixtures,
+        totalPages: Math.ceil(totalFixtures / limit),
+      },
+    };
   }
 
   getHeadToHead(query: QueryParams): Promise<ApiFootballResponse> {
@@ -243,6 +286,7 @@ export class FootballService {
     page?: string;
     limit?: string;
     timezone?: string;
+    statusGroup?: 'ALL' | 'LIVE' | 'UPCOMING' | 'FINISHED';
   }): Promise<{
     date: string;
     timezone: string;
@@ -264,12 +308,15 @@ export class FootballService {
       timezone,
     })) as ApiFootballFixturesResponse;
 
-    const fixtures = fixturesResponse.response ?? [];
+    const fixtures = this.filterFixturesByStatusGroup(
+      fixturesResponse.response ?? [],
+      query.statusGroup ?? 'ALL',
+    );
+
     const groupedMap = new Map<number, LeagueFixturesGroup>();
 
     for (const fixture of fixtures) {
       const leagueId = fixture.league.id;
-
       const existingGroup = groupedMap.get(leagueId);
 
       if (!existingGroup) {
@@ -310,6 +357,10 @@ export class FootballService {
           return leftFirstKickoff - rightFirstKickoff;
         }
 
+        if (left.league.country !== right.league.country) {
+          return left.league.country.localeCompare(right.league.country);
+        }
+
         return left.league.name.localeCompare(right.league.name);
       });
 
@@ -330,6 +381,47 @@ export class FootballService {
         totalMatches,
       },
     };
+  }
+
+  private filterFixturesByStatusGroup(
+    fixtures: NonNullable<ApiFootballFixturesResponse['response']>,
+    statusGroup: 'ALL' | 'LIVE' | 'UPCOMING' | 'FINISHED',
+  ): NonNullable<ApiFootballFixturesResponse['response']> {
+    if (statusGroup === 'ALL') {
+      return fixtures;
+    }
+
+    const liveStatuses = new Set([
+      '1H',
+      'HT',
+      '2H',
+      'ET',
+      'BT',
+      'P',
+      'SUSP',
+      'INT',
+    ]);
+
+    const upcomingStatuses = new Set(['NS', 'TBD']);
+    const finishedStatuses = new Set(['FT', 'AET', 'PEN', 'PSO']);
+
+    return fixtures.filter((fixture) => {
+      const status = fixture.fixture.status.short;
+
+      if (statusGroup === 'LIVE') {
+        return liveStatuses.has(status);
+      }
+
+      if (statusGroup === 'UPCOMING') {
+        return upcomingStatuses.has(status);
+      }
+
+      if (statusGroup === 'FINISHED') {
+        return finishedStatuses.has(status);
+      }
+
+      return true;
+    });
   }
 
   async searchAll(

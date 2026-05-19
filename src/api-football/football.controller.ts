@@ -15,6 +15,11 @@ export class FootballController {
     return this.footballService.getLiveFixtures();
   }
 
+  @Get('fixtures/by-time')
+  getFixturesByTime(@Query() query: LeagueFixturesQueryDto) {
+    return this.footballService.getFixturesByTime(query);
+  }
+
   @Get('fixtures/head-to-head')
   getHeadToHead(@Query() query: FootballQueryDto) {
     return this.footballService.getHeadToHead(query);
