@@ -4,11 +4,17 @@ import { FootballService } from './football.service';
 import { SearchQueryDto } from './dto/football-filters.dto';
 import { FootballQueryDto } from './dto/football-query.dto';
 import { LeagueFixturesQueryDto } from './dto/league-fixtures-query.dto';
+import { FootballCompositeService } from './football-composite.service';
+import { FootballCompositeQueryDto } from './dto/football-composite-query.dto';
+import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.enum';
 
 @Public()
 @Controller('football')
 export class FootballController {
-  constructor(private readonly footballService: FootballService) {}
+  constructor(
+    private readonly footballService: FootballService,
+    private readonly footballCompositeService: FootballCompositeService,
+  ) {}
 
   @Get('fixtures/live')
   getLiveFixtures() {
@@ -68,6 +74,44 @@ export class FootballController {
     return this.footballService.getTeamFixtures(String(teamId), query);
   }
 
+  @Get('teams/:teamId/overview')
+  getTeamOverview(
+    @Param('teamId', ParseIntPipe) teamId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getTeamOverview(String(teamId), query);
+  }
+
+  @Get('teams/:teamId/top-players')
+  getTeamTopPlayers(
+    @Param('teamId', ParseIntPipe) teamId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getTeamTopPlayers(
+      String(teamId),
+      query,
+    );
+  }
+
+  @Get('teams/:teamId/about')
+  getTeamAbout(
+    @Param('teamId', ParseIntPipe) teamId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getTeamAbout(String(teamId), query);
+  }
+
+  @Get('teams/:teamId/trophies-preview')
+  getTeamTrophiesPreview(
+    @Param('teamId', ParseIntPipe) teamId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getTeamTrophiesPreview(
+      String(teamId),
+      query,
+    );
+  }
+
   @Get('teams')
   getTeams(@Query() query: FootballQueryDto) {
     return this.footballService.getTeams(query);
@@ -118,6 +162,50 @@ export class FootballController {
     return this.footballService.getPlayers(query);
   }
 
+  @Get('players/:playerId/recent-matches')
+  getPlayerRecentMatches(
+    @Param('playerId', ParseIntPipe) playerId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getPlayerRecentMatches(
+      String(playerId),
+      query,
+    );
+  }
+
+  @Get('players/:playerId/career-totals')
+  getPlayerCareerTotals(
+    @Param('playerId', ParseIntPipe) playerId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getPlayerCareerTotals(
+      String(playerId),
+      query,
+    );
+  }
+
+  @Get('players/:playerId/traits')
+  getPlayerTraits(
+    @Param('playerId', ParseIntPipe) playerId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getPlayerTraits(
+      String(playerId),
+      query,
+    );
+  }
+
+  @Get('players/:playerId/trophies/grouped')
+  getGroupedPlayerTrophies(
+    @Param('playerId', ParseIntPipe) playerId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getGroupedPlayerTrophies(
+      String(playerId),
+      query,
+    );
+  }
+
   @Get('transfers')
   getTransfers(@Query() query: FootballQueryDto) {
     return this.footballService.getTransfers(query);
@@ -126,6 +214,28 @@ export class FootballController {
   @Get('injuries')
   getInjuries(@Query() query: FootballQueryDto) {
     return this.footballService.getInjuries(query);
+  }
+
+  @Get('coaches/:coachId/current-record')
+  getCoachCurrentRecord(
+    @Param('coachId', ParseIntPipe) coachId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getCoachCurrentRecord(
+      String(coachId),
+      query,
+    );
+  }
+
+  @Get('coaches/:coachId/trophies/grouped')
+  getGroupedCoachTrophies(
+    @Param('coachId', ParseIntPipe) coachId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getGroupedCoachTrophies(
+      String(coachId),
+      query,
+    );
   }
 
   @Get('coaches')
@@ -157,8 +267,56 @@ export class FootballController {
     });
   }
 
+  @Get('popular')
+  getPopularEntities(@Query() query: FootballCompositeQueryDto) {
+    const entityType = query.entityType ?? 'TEAM';
+
+    return this.footballCompositeService.getPopularEntities({
+      entityType: entityType as FollowEntityType,
+      page: query.page,
+      limit: query.limit,
+    });
+  }
+
+  @Get('leagues/top')
+  getTopLeagues(@Query() query: FootballCompositeQueryDto) {
+    return this.footballCompositeService.getTopLeagues(query);
+  }
+
+  @Get('leagues/by-country')
+  getLeaguesByCountry(@Query() query: FootballCompositeQueryDto) {
+    return this.footballCompositeService.getLeaguesByCountry(query);
+  }
+
   @Get('leagues/seasons')
   getLeaguesSeasons(@Query() query: FootballQueryDto) {
     return this.footballService.getLeaguesSeasons(query);
+  }
+
+  @Get('matches/:fixtureId/about')
+  getMatchAbout(@Param('fixtureId', ParseIntPipe) fixtureId: number) {
+    return this.footballCompositeService.getMatchAbout(String(fixtureId));
+  }
+
+  @Get('matches/:fixtureId/knockout-bracket')
+  getKnockoutBracket(
+    @Param('fixtureId', ParseIntPipe) fixtureId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getKnockoutBracket(
+      String(fixtureId),
+      query,
+    );
+  }
+
+  @Get('matches/:fixtureId/top-scorers-comparison')
+  getMatchTopScorersComparison(
+    @Param('fixtureId', ParseIntPipe) fixtureId: number,
+    @Query() query: FootballCompositeQueryDto,
+  ) {
+    return this.footballCompositeService.getMatchTopScorersComparison(
+      String(fixtureId),
+      query,
+    );
   }
 }
