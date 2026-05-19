@@ -85,7 +85,26 @@ export class FixturesQueryDto {
 
   @IsOptional()
   @Transform(trimString)
-  @IsIn(['NS', 'TBD', '1H', 'HT', '2H', 'ET', 'BT', 'P', 'SUSP', 'INT', 'FT', 'AET', 'PEN', 'PSO', 'CANC', 'ABD', 'AWD', 'WO'])
+  @IsIn([
+    'NS',
+    'TBD',
+    '1H',
+    'HT',
+    '2H',
+    'ET',
+    'BT',
+    'P',
+    'SUSP',
+    'INT',
+    'FT',
+    'AET',
+    'PEN',
+    'PSO',
+    'CANC',
+    'ABD',
+    'AWD',
+    'WO',
+  ])
   status?: string;
 
   @IsOptional()
@@ -157,8 +176,19 @@ export class SearchQueryDto {
   @Length(3, 100)
   q!: string;
 
+  @IsOptional()
   @Transform(trimString)
   @IsString()
   @Length(1, 20)
-  season!: string;
+  season?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  page?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  limit?: string;
 }

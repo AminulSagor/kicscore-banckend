@@ -150,7 +150,11 @@ export class FootballController {
 
   @Get('search')
   searchAll(@Query() query: SearchQueryDto) {
-    return this.footballService.searchAll(query.q, query.season);
+    return this.footballService.searchAll(query.q, {
+      season: query.season,
+      page: query.page,
+      limit: query.limit,
+    });
   }
 
   @Get('leagues/seasons')
