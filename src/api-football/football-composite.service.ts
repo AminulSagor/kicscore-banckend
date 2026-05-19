@@ -4,6 +4,13 @@ import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.e
 import { FollowsService } from 'src/modules/follows/follows.service';
 import { FootballCompositeQueryDto } from './dto/football-composite-query.dto';
 import { FootballService } from './football.service';
+import {
+  FixtureItem,
+  PlayerStatsItem,
+  StandingLeagueBlock,
+  StandingRow,
+  TeamProfileItem,
+} from 'src/common/interfaces/api-football-custom-response.interface';
 
 type ApiFootballResponse = unknown;
 
@@ -18,6 +25,310 @@ export class FootballCompositeService {
     private readonly footballService: FootballService,
     private readonly followsService: FollowsService,
   ) {}
+
+  private findTeamStandingRow(
+    standingsData: unknown,
+    teamId: string,
+  ): StandingRow | null {
+    const response = (
+      standingsData as ApiFootballWrapped<StandingLeagueBlock> | null
+    )?.response;
+
+    const rows = response?.[0]?.league?.standings?.flat() ?? [];
+
+    return (
+      rows.find((row) => {
+        return String(row.team?.id) === teamId;
+      }) ?? null
+    );
+  }
+
+  private buildRecentFormText(
+    matchesData: unknown,
+    teamId: string,
+  ): string | null {
+    const fixtures =
+      (matchesData as ApiFootballWrapped<FixtureItem>).response ?? [];
+
+    if (!fixtures.length) {
+      return null;
+    }
+
+    let wins = 0;
+    let draws = 0;
+    let losses = 0;
+
+    for (const fixture of fixtures) {
+      const homeId = String(fixture.teams?.home?.id);
+      const awayId = String(fixture.teams?.away?.id);
+      const homeGoals = fixture.goals?.home;
+      const awayGoals = fixture.goals?.away;
+
+      if (homeGoals === null || homeGoals === undefined) {
+        continue;
+      }
+
+      if (awayGoals === null || awayGoals === undefined) {
+        continue;
+      }
+
+      if (homeGoals === awayGoals) {
+        draws += 1;
+        continue;
+      }
+
+      const teamIsHome = homeId === teamId;
+      const teamWon =
+        (teamIsHome && homeGoals > awayGoals) ||
+        (!teamIsHome && awayId === teamId && awayGoals > homeGoals);
+
+      if (teamWon) {
+        wins += 1;
+      } else {
+        losses += 1;
+      }
+    }
+
+    return `In their recent matches, the team recorded ${wins} wins, ${draws} draws, and ${losses} losses.`;
+  }
+
+  private getTopPlayerNames(playersData: unknown, limit: number): string[] {
+    const players = (playersData as ApiFootballWrapped<PlayerStatsItem> | null)
+      ?.response;
+
+    if (!players?.length) {
+      return [];
+    }
+
+    return players
+      .map((item) => {
+        const stats = item.statistics?.[0];
+        const rating = Number(stats?.games?.rating ?? 0);
+        const goals = stats?.goals?.total ?? 0;
+        const assists = stats?.goals?.assists ?? 0;
+
+        return {
+          name: item.player?.name,
+          score: rating * 10 + goals * 2 + assists,
+        };
+      })
+      .filter((item): item is { name: string; score: number } => {
+        return Boolean(item.name);
+      })
+      .sort((left, right) => right.score - left.score)
+      .slice(0, limit)
+      .map((item) => item.name);
+  }
+
+  private getCoachName(coachData: unknown): string | null {
+    const coach = (coachData as ApiFootballWrapped<{ name?: string }>)
+      .response?.[0];
+
+    return coach?.name ?? null;
+  }
+
+  private getLeagueNames(leaguesData: unknown, limit: number): string[] {
+    const leagues =
+      (leaguesData as ApiFootballWrapped<{ league?: { name?: string } }>)
+        .response ?? [];
+
+    return leagues
+      .map((item) => item.league?.name)
+      .filter((name): name is string => Boolean(name))
+      .slice(0, limit);
+  }
+
+  private buildHeadToHeadSummary(
+    h2hData: unknown,
+    homeTeamName: string,
+    awayTeamName: string,
+  ): string | null {
+    const fixtures = (h2hData as ApiFootballWrapped<FixtureItem> | null)
+      ?.response;
+
+    if (!fixtures?.length) {
+      return null;
+    }
+
+    let homeWins = 0;
+    let awayWins = 0;
+    let draws = 0;
+
+    for (const fixture of fixtures) {
+      const homeGoals = fixture.goals?.home;
+      const awayGoals = fixture.goals?.away;
+
+      if (homeGoals === null || homeGoals === undefined) {
+        continue;
+      }
+
+      if (awayGoals === null || awayGoals === undefined) {
+        continue;
+      }
+
+      if (homeGoals === awayGoals) {
+        draws += 1;
+      } else if (homeGoals > awayGoals) {
+        homeWins += 1;
+      } else {
+        awayWins += 1;
+      }
+    }
+
+    return `Across the recent head-to-head meetings, ${homeTeamName} have ${homeWins} wins, ${awayTeamName} have ${awayWins} wins, and ${draws} matches ended level.`;
+  }
+
+  private calculatePlayerTraits(
+    player: PlayerStatsItem,
+    leaguePlayers: PlayerStatsItem[],
+  ) {
+    const playerStats = player.statistics?.[0];
+
+    const metrics = {
+      attacking:
+        (playerStats?.goals?.total ?? 0) * 4 +
+        (playerStats?.shots?.on ?? 0) * 1.5 +
+        (playerStats?.dribbles?.success ?? 0),
+
+      creativity:
+        (playerStats?.goals?.assists ?? 0) * 4 +
+        (playerStats?.passes?.key ?? 0) * 2,
+
+      passing:
+        (playerStats?.passes?.accuracy ?? 0) +
+        (playerStats?.passes?.total ?? 0) / 20,
+
+      defending:
+        (playerStats?.tackles?.total ?? 0) * 2 +
+        (playerStats?.tackles?.interceptions ?? 0) * 2 +
+        (playerStats?.duels?.won ?? 0),
+
+      discipline: Math.max(
+        0,
+        100 -
+          (playerStats?.cards?.yellow ?? 0) * 5 -
+          (playerStats?.cards?.red ?? 0) * 20,
+      ),
+
+      availability: Math.min((playerStats?.games?.appearances ?? 0) * 4, 100),
+    };
+
+    const leagueMetricRows = leaguePlayers.map((leaguePlayer) => {
+      const stats = leaguePlayer.statistics?.[0];
+
+      return {
+        attacking:
+          (stats?.goals?.total ?? 0) * 4 +
+          (stats?.shots?.on ?? 0) * 1.5 +
+          (stats?.dribbles?.success ?? 0),
+
+        creativity:
+          (stats?.goals?.assists ?? 0) * 4 + (stats?.passes?.key ?? 0) * 2,
+
+        passing:
+          (stats?.passes?.accuracy ?? 0) + (stats?.passes?.total ?? 0) / 20,
+
+        defending:
+          (stats?.tackles?.total ?? 0) * 2 +
+          (stats?.tackles?.interceptions ?? 0) * 2 +
+          (stats?.duels?.won ?? 0),
+
+        discipline: Math.max(
+          0,
+          100 - (stats?.cards?.yellow ?? 0) * 5 - (stats?.cards?.red ?? 0) * 20,
+        ),
+
+        availability: Math.min((stats?.games?.appearances ?? 0) * 4, 100),
+      };
+    });
+
+    return {
+      attacking: this.percentile(
+        metrics.attacking,
+        leagueMetricRows.map((row) => row.attacking),
+      ),
+      creativity: this.percentile(
+        metrics.creativity,
+        leagueMetricRows.map((row) => row.creativity),
+      ),
+      passing: this.percentile(
+        metrics.passing,
+        leagueMetricRows.map((row) => row.passing),
+      ),
+      defending: this.percentile(
+        metrics.defending,
+        leagueMetricRows.map((row) => row.defending),
+      ),
+      discipline: this.percentile(
+        metrics.discipline,
+        leagueMetricRows.map((row) => row.discipline),
+      ),
+      availability: this.percentile(
+        metrics.availability,
+        leagueMetricRows.map((row) => row.availability),
+      ),
+    };
+  }
+
+  private percentile(value: number, values: number[]): number {
+    if (!values.length) {
+      return 0;
+    }
+
+    const lowerOrEqual = values.filter((item) => item <= value).length;
+
+    return Math.round((lowerOrEqual / values.length) * 100);
+  }
+
+  private buildPlayerTraitsSummary(
+    player: PlayerStatsItem,
+    traits: {
+      attacking: number;
+      creativity: number;
+      passing: number;
+      defending: number;
+      discipline: number;
+      availability: number;
+    },
+  ): string {
+    const playerName = player.player?.name ?? 'This player';
+    const nationality = player.player?.nationality;
+    const position = player.player?.position;
+
+    const bestTrait = Object.entries(traits).sort((left, right) => {
+      return right[1] - left[1];
+    })[0];
+
+    let summary = `${playerName}`;
+
+    if (nationality) {
+      summary += ` from ${nationality}`;
+    }
+
+    if (position) {
+      summary += ` is listed as a ${position}`;
+    }
+
+    summary += `.`;
+
+    if (bestTrait) {
+      summary += ` Their strongest current trait is ${bestTrait[0]}, rated at ${bestTrait[1]} out of 100 compared with players in the selected league.`;
+    }
+
+    return summary;
+  }
+
+  private joinNames(names: string[]): string {
+    if (names.length === 1) {
+      return names[0];
+    }
+
+    if (names.length === 2) {
+      return `${names[0]} and ${names[1]}`;
+    }
+
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  }
 
   async getTopLeagues(query: FootballCompositeQueryDto) {
     return this.getPopularEntities({
@@ -82,15 +393,99 @@ export class FootballCompositeService {
   }
 
   async getMatchAbout(fixtureId: string) {
-    const fixture = await this.footballService.getFixtureById(fixtureId);
+    const fixtureData = await this.footballService.getFixtureById(fixtureId);
+
+    const fixture = (fixtureData as ApiFootballWrapped<FixtureItem>)
+      .response?.[0];
+
+    if (!fixture) {
+      return {
+        fixtureId,
+        about: 'Match information is not available yet.',
+        source: {
+          fixture: fixtureData,
+        },
+      };
+    }
+
+    const homeTeam = fixture.teams?.home;
+    const awayTeam = fixture.teams?.away;
+    const homeTeamName = homeTeam?.name ?? 'Home team';
+    const awayTeamName = awayTeam?.name ?? 'Away team';
+    const leagueName = fixture.league?.name;
+    const round = fixture.league?.round;
+    const venueName = fixture.fixture?.venue?.name;
+    const venueCity = fixture.fixture?.venue?.city;
+    const statusLong = fixture.fixture?.status?.long;
+    const statusShort = fixture.fixture?.status?.short;
+    const homeGoals = fixture.goals?.home;
+    const awayGoals = fixture.goals?.away;
+
+    const h2h =
+      homeTeam?.id && awayTeam?.id
+        ? await this.footballService.getHeadToHead({
+            h2h: `${homeTeam.id}-${awayTeam.id}`,
+            last: '5',
+          })
+        : null;
+
+    const aboutParts: string[] = [];
+
+    let intro = `${homeTeamName} face ${awayTeamName}`;
+
+    if (leagueName) {
+      intro += ` in ${leagueName}`;
+    }
+
+    if (round) {
+      intro += `, ${round}`;
+    }
+
+    intro += '.';
+
+    aboutParts.push(intro);
+
+    if (venueName) {
+      let venueText = `The match is being played at ${venueName}`;
+
+      if (venueCity) {
+        venueText += ` in ${venueCity}`;
+      }
+
+      venueText += '.';
+
+      aboutParts.push(venueText);
+    }
+
+    if (statusShort && statusShort !== 'NS' && statusLong) {
+      const scoreText =
+        homeGoals !== null &&
+        homeGoals !== undefined &&
+        awayGoals !== null &&
+        awayGoals !== undefined
+          ? ` with the score at ${homeTeamName} ${homeGoals}-${awayGoals} ${awayTeamName}`
+          : '';
+
+      aboutParts.push(`The current match status is ${statusLong}${scoreText}.`);
+    }
+
+    const h2hSummary = this.buildHeadToHeadSummary(
+      h2h,
+      homeTeamName,
+      awayTeamName,
+    );
+
+    if (h2hSummary) {
+      aboutParts.push(h2hSummary);
+    }
 
     return {
       fixtureId,
+      about: aboutParts.join(' '),
       source: {
-        fixture,
+        fixture: fixtureData,
+        headToHead: h2h,
       },
-      about:
-        'This match preview is generated from fixture metadata. Add standings and H2H enrichment later for a richer paragraph.',
     };
   }
 
@@ -106,6 +501,55 @@ export class FootballCompositeService {
       };
     }
 
+    const leagueId = String(query.league);
+
+    if (leagueId === '1') {
+      return this.getWorldCupKnockoutBracket(fixtureId, query);
+    }
+
+    return this.getGenericKnockoutBracket(fixtureId, query);
+  }
+
+  private async getWorldCupKnockoutBracket(
+    fixtureId: string,
+    query: FootballCompositeQueryDto,
+  ) {
+    const worldCupRounds = [
+      'Round of 16',
+      'Quarter-finals',
+      'Semi-finals',
+      '3rd Place Final',
+      'Final',
+    ];
+
+    const bracketRounds = await Promise.all(
+      worldCupRounds.map(async (roundName) => {
+        const fixtures = await this.footballService.getFixtures({
+          league: query.league,
+          season: query.season,
+          round: roundName,
+        });
+
+        return {
+          round: roundName,
+          fixtures,
+        };
+      }),
+    );
+
+    return {
+      fixtureId,
+      league: query.league,
+      season: query.season,
+      competition: 'World Cup',
+      rounds: bracketRounds,
+    };
+  }
+
+  private async getGenericKnockoutBracket(
+    fixtureId: string,
+    query: FootballCompositeQueryDto,
+  ) {
     const rounds = (await this.footballService.getFixtureRounds({
       league: query.league,
       season: query.season,
@@ -113,8 +557,12 @@ export class FootballCompositeService {
 
     const roundNames = rounds.response ?? [];
 
+    const knockoutRoundNames = roundNames.filter((roundName) => {
+      return this.isKnockoutRound(roundName);
+    });
+
     const bracketRounds = await Promise.all(
-      roundNames.map(async (roundName) => {
+      knockoutRoundNames.map(async (roundName) => {
         const fixtures = await this.footballService.getFixtures({
           league: query.league,
           season: query.season,
@@ -134,6 +582,21 @@ export class FootballCompositeService {
       season: query.season,
       rounds: bracketRounds,
     };
+  }
+
+  private isKnockoutRound(roundName: string): boolean {
+    const normalizedRound = roundName.toLowerCase();
+
+    return [
+      'round of 16',
+      'quarter',
+      'semi',
+      'final',
+      '3rd place',
+      'third place',
+      'play-offs',
+      'playoffs',
+    ].some((keyword) => normalizedRound.includes(keyword));
   }
 
   async getMatchTopScorersComparison(
@@ -219,13 +682,137 @@ export class FootballCompositeService {
   }
 
   async getTeamAbout(teamId: string, query: FootballCompositeQueryDto) {
-    const overview = await this.getTeamOverview(teamId, query);
+    const [teamData, lastMatchesData, leaguesData, squadData, coachData] =
+      await Promise.all([
+        this.footballService.getTeams({ id: teamId }),
+        this.footballService.getTeamFixtures(teamId, { last: '6' }),
+        this.footballService.getLeagues({
+          team: teamId,
+          season: query.season,
+        }),
+        this.footballService.getPlayerSquads({ team: teamId }),
+        this.footballService.getCoaches({ team: teamId }),
+      ]);
+
+    const standingsData =
+      query.league && query.season
+        ? await this.footballService.getStandings({
+            league: query.league,
+            season: query.season,
+          })
+        : null;
+
+    const playerStatsData = query.season
+      ? await this.footballService.getPlayers({
+          team: teamId,
+          season: query.season,
+          page: '1',
+          limit: '50',
+        })
+      : null;
+
+    const teamProfile = (teamData as ApiFootballWrapped<TeamProfileItem>)
+      .response?.[0];
+
+    const teamName = teamProfile?.team?.name ?? 'This team';
+    const country = teamProfile?.team?.country;
+    const venueName = teamProfile?.venue?.name;
+    const venueCity = teamProfile?.venue?.city;
+    const venueCapacity = teamProfile?.venue?.capacity;
+    const venueSurface = teamProfile?.venue?.surface;
+
+    const standingRow = this.findTeamStandingRow(standingsData, teamId);
+    const recentForm = this.buildRecentFormText(lastMatchesData, teamId);
+    const topPlayers = this.getTopPlayerNames(playerStatsData, 3);
+    const coachName = this.getCoachName(coachData);
+    const activeLeagues = this.getLeagueNames(leaguesData, 3);
+
+    const aboutParts: string[] = [];
+
+    let intro = `${teamName} is a football club`;
+
+    if (country) {
+      intro += ` from ${country}`;
+    }
+
+    if (venueName) {
+      intro += `, playing their home matches at ${venueName}`;
+      if (venueCity) {
+        intro += ` in ${venueCity}`;
+      }
+    }
+
+    intro += '.';
+
+    aboutParts.push(intro);
+
+    if (venueCapacity || venueSurface) {
+      const venueInfo: string[] = [];
+
+      if (venueCapacity) {
+        venueInfo.push(
+          `the stadium capacity is ${venueCapacity.toLocaleString()}`,
+        );
+      }
+
+      if (venueSurface) {
+        venueInfo.push(`the playing surface is ${venueSurface}`);
+      }
+
+      aboutParts.push(`At their home ground, ${venueInfo.join(' and ')}.`);
+    }
+
+    if (standingRow) {
+      const rankText = standingRow.rank
+        ? `ranked ${standingRow.rank}`
+        : 'listed in the table';
+
+      const pointsText =
+        typeof standingRow.points === 'number'
+          ? ` with ${standingRow.points} points`
+          : '';
+
+      const descriptionText = standingRow.description
+        ? ` Their current table zone is ${standingRow.description}.`
+        : '';
+
+      aboutParts.push(
+        `${teamName} are currently ${rankText}${pointsText}.${descriptionText}`,
+      );
+    }
+
+    if (recentForm) {
+      aboutParts.push(recentForm);
+    }
+
+    if (topPlayers.length > 0) {
+      aboutParts.push(
+        `Key players in the current season include ${this.joinNames(topPlayers)}.`,
+      );
+    }
+
+    if (coachName) {
+      aboutParts.push(`The team is currently managed by ${coachName}.`);
+    }
+
+    if (activeLeagues.length > 0) {
+      aboutParts.push(
+        `${teamName} are active in ${this.joinNames(activeLeagues)}.`,
+      );
+    }
 
     return {
       teamId,
-      source: overview,
-      about:
-        'This team summary is generated from team profile, recent matches, standings, squad, and coach data.',
+      about: aboutParts.join(' '),
+      source: {
+        team: teamData,
+        lastMatches: lastMatchesData,
+        standings: standingsData,
+        leagues: leaguesData,
+        squad: squadData,
+        coach: coachData,
+        playerStats: playerStatsData,
+      },
     };
   }
 
@@ -317,11 +904,12 @@ export class FootballCompositeService {
       return {
         playerId,
         traits: null,
+        about: null,
         message: 'league and season are required',
       };
     }
 
-    const [player, leaguePlayers] = await Promise.all([
+    const [playerData, leaguePlayersData] = await Promise.all([
       this.footballService.getPlayers({
         id: playerId,
         season: query.season,
@@ -329,15 +917,40 @@ export class FootballCompositeService {
       this.footballService.getPlayers({
         league: query.league,
         season: query.season,
+        page: '1',
+        limit: '500',
       }),
     ]);
 
+    const player = (playerData as ApiFootballWrapped<PlayerStatsItem>)
+      .response?.[0];
+
+    const leaguePlayers =
+      (leaguePlayersData as ApiFootballWrapped<PlayerStatsItem>).response ?? [];
+
+    if (!player) {
+      return {
+        playerId,
+        traits: null,
+        about: 'Player data is not available for this season.',
+        source: {
+          player: playerData,
+          leaguePlayers: leaguePlayersData,
+        },
+      };
+    }
+
+    const traits = this.calculatePlayerTraits(player, leaguePlayers);
+    const about = this.buildPlayerTraitsSummary(player, traits);
+
     return {
       playerId,
-      player,
-      leaguePlayers,
-      traits:
-        'Use this data to calculate frontend/backend percentile radar traits.',
+      about,
+      traits,
+      source: {
+        player: playerData,
+        leaguePlayers: leaguePlayersData,
+      },
     };
   }
 

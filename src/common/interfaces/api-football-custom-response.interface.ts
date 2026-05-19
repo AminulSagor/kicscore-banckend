@@ -96,3 +96,138 @@ export interface FixturesByTimeResponse {
     totalPages: number;
   };
 }
+
+export type ApiFootballWrapped<T> = {
+  response?: T[];
+  results?: number;
+};
+
+export interface TeamProfileItem {
+  team?: {
+    id?: number;
+    name?: string;
+    country?: string;
+    founded?: number | null;
+  };
+  venue?: {
+    name?: string | null;
+    city?: string | null;
+    capacity?: number | null;
+    surface?: string | null;
+  };
+}
+
+export interface FixtureItem {
+  fixture?: {
+    id?: number;
+    date?: string;
+    venue?: {
+      name?: string | null;
+      city?: string | null;
+    };
+    status?: {
+      long?: string;
+      short?: string;
+      elapsed?: number | null;
+    };
+  };
+  league?: {
+    id?: number;
+    name?: string;
+    country?: string;
+    season?: number;
+    round?: string;
+  };
+  teams?: {
+    home?: {
+      id?: number;
+      name?: string;
+      winner?: boolean | null;
+    };
+    away?: {
+      id?: number;
+      name?: string;
+      winner?: boolean | null;
+    };
+  };
+  goals?: {
+    home?: number | null;
+    away?: number | null;
+  };
+}
+
+export interface StandingRow {
+  rank?: number;
+  team?: {
+    id?: number;
+    name?: string;
+  };
+  points?: number;
+  goalsDiff?: number;
+  form?: string | null;
+  description?: string | null;
+}
+
+export interface StandingLeagueBlock {
+  league?: {
+    id?: number;
+    name?: string;
+    standings?: StandingRow[][];
+  };
+}
+
+export interface PlayerStatsItem {
+  player?: {
+    id?: number;
+    name?: string;
+    firstname?: string;
+    lastname?: string;
+    age?: number;
+    nationality?: string;
+    position?: string;
+  };
+  statistics?: Array<{
+    team?: {
+      id?: number;
+      name?: string;
+    };
+    league?: {
+      id?: number;
+      name?: string;
+    };
+    games?: {
+      appearances?: number | null;
+      minutes?: number | null;
+      rating?: string | null;
+    };
+    goals?: {
+      total?: number | null;
+      assists?: number | null;
+    };
+    shots?: {
+      total?: number | null;
+      on?: number | null;
+    };
+    passes?: {
+      total?: number | null;
+      key?: number | null;
+      accuracy?: number | null;
+    };
+    tackles?: {
+      total?: number | null;
+      interceptions?: number | null;
+    };
+    duels?: {
+      total?: number | null;
+      won?: number | null;
+    };
+    dribbles?: {
+      attempts?: number | null;
+      success?: number | null;
+    };
+    cards?: {
+      yellow?: number | null;
+      red?: number | null;
+    };
+  }>;
+}
