@@ -13,8 +13,10 @@ import { ApiFootballRequestPriority } from './enums/api-football-request-priorit
 import { LeagueFixturesQueryDto } from './dto/league-fixtures-query.dto';
 import {
   ApiFootballFixturesResponse,
+  FixturesByTimeResponse,
   LeagueFixturesGroup,
 } from 'src/common/interfaces/api-football-custom-response.interface';
+import { BackendPaginationParams } from 'src/common/interfaces/pagination.interface';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
@@ -27,8 +29,78 @@ export class FootballService {
     private readonly redisService: RedisService,
   ) {}
 
+  private async cachedPaginated(
+    endpoint: string,
+    params: QueryParams,
+    cacheConfig: { ttl: number; staleTtl: number },
+    priority = ApiFootballRequestPriority.MEDIUM,
+  ): Promise<ApiFootballResponse> {
+    const { apiParams, page, limit, shouldPaginate } =
+      this.extractBackendPaginationParams(params);
+
+    const data = await this.cached(endpoint, apiParams, cacheConfig, priority);
+
+    if (!shouldPaginate) {
+      return data;
+    }
+
+    return this.paginateApiFootballResponse(data, page, limit);
+  }
+
+  private extractBackendPaginationParams(
+    params: QueryParams,
+  ): BackendPaginationParams {
+    const { page, limit, ...apiParams } = params;
+
+    return {
+      apiParams,
+      page: this.toPositiveNumber(page, 1),
+      limit: this.toPositiveNumber(limit, 20),
+      shouldPaginate: page !== undefined || limit !== undefined,
+    };
+  }
+
+  private paginateApiFootballResponse(
+    data: ApiFootballResponse,
+    page: number,
+    limit: number,
+  ): ApiFootballResponse {
+    if (!data || typeof data !== 'object') {
+      return data;
+    }
+
+    const responseData = data as {
+      response?: unknown;
+      results?: number;
+    };
+
+    if (!Array.isArray(responseData.response)) {
+      return data;
+    }
+
+    const totalItems = responseData.response.length;
+    const totalPages = Math.ceil(totalItems / limit);
+    const startIndex = (page - 1) * limit;
+    const paginatedResponse = responseData.response.slice(
+      startIndex,
+      startIndex + limit,
+    );
+
+    return {
+      ...responseData,
+      results: paginatedResponse.length,
+      response: paginatedResponse,
+      backendPaging: {
+        page,
+        limit,
+        totalItems,
+        totalPages,
+      },
+    };
+  }
+
   getLiveFixtures(): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures',
       { live: 'all' },
       apiFootballCacheConfig.liveFixtures,
@@ -37,11 +109,11 @@ export class FootballService {
   }
 
   getFixtures(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached('/fixtures', query, this.getFixturesTtl(query));
+    return this.cachedPaginated('/fixtures', query, this.getFixturesTtl(query));
   }
 
   getFixtureById(fixtureId: string): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures',
       { ids: fixtureId },
       apiFootballCacheConfig.liveFixtureDetail,
@@ -50,7 +122,7 @@ export class FootballService {
   }
 
   getFixtureEvents(fixtureId: string): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures/events',
       { fixture: fixtureId },
       apiFootballCacheConfig.liveEvents,
@@ -59,7 +131,7 @@ export class FootballService {
   }
 
   getFixtureStatistics(fixtureId: string): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures/statistics',
       { fixture: fixtureId },
       apiFootballCacheConfig.liveStats,
@@ -72,15 +144,57 @@ export class FootballService {
   }
 
   getFixturePlayers(fixtureId: string): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures/players',
       { fixture: fixtureId },
       apiFootballCacheConfig.fixturesPast,
     );
   }
 
+  async getFixturesByTime(query: {
+    date: string;
+    page?: string;
+    limit?: string;
+    timezone?: string;
+    statusGroup?: 'ALL' | 'LIVE' | 'UPCOMING' | 'FINISHED';
+  }): Promise<FixturesByTimeResponse> {
+    const page = this.toPositiveNumber(query.page, 1);
+    const limit = this.toPositiveNumber(query.limit, 20);
+    const timezone = query.timezone ?? 'Asia/Dhaka';
+
+    const fixturesResponse = (await this.getFixtures({
+      date: query.date,
+      timezone,
+    })) as ApiFootballFixturesResponse;
+
+    const filteredFixtures = this.filterFixturesByStatusGroup(
+      fixturesResponse.response ?? [],
+      query.statusGroup ?? 'ALL',
+    );
+
+    const sortedFixtures = filteredFixtures.sort((left, right) => {
+      return left.fixture.timestamp - right.fixture.timestamp;
+    });
+
+    const totalFixtures = sortedFixtures.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedItems = sortedFixtures.slice(startIndex, startIndex + limit);
+
+    return {
+      date: query.date,
+      timezone,
+      items: paginatedItems,
+      meta: {
+        page,
+        limit,
+        totalFixtures,
+        totalPages: Math.ceil(totalFixtures / limit),
+      },
+    };
+  }
+
   getHeadToHead(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures/headtohead',
       query,
       apiFootballCacheConfig.fixturesPast,
@@ -88,7 +202,7 @@ export class FootballService {
   }
 
   getFixtureRounds(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures/rounds',
       query,
       apiFootballCacheConfig.leagueProfile,
@@ -100,14 +214,14 @@ export class FootballService {
       ? apiFootballCacheConfig.search
       : apiFootballCacheConfig.teamProfile;
 
-    return this.cached('/teams', query, cacheConfig);
+    return this.cachedPaginated('/teams', query, cacheConfig);
   }
 
   getTeamFixtures(
     teamId: string,
     query: QueryParams,
   ): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/fixtures',
       {
         team: teamId,
@@ -122,11 +236,11 @@ export class FootballService {
       ? apiFootballCacheConfig.search
       : apiFootballCacheConfig.leagueProfile;
 
-    return this.cached('/leagues', query, cacheConfig);
+    return this.cachedPaginated('/leagues', query, cacheConfig);
   }
 
   getCountries(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/countries',
       query,
       apiFootballCacheConfig.leagueProfile,
@@ -135,7 +249,11 @@ export class FootballService {
   }
 
   getStandings(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached('/standings', query, apiFootballCacheConfig.standings);
+    return this.cachedPaginated(
+      '/standings',
+      query,
+      apiFootballCacheConfig.standings,
+    );
   }
 
   getPlayers(query: QueryParams): Promise<ApiFootballResponse> {
@@ -143,11 +261,11 @@ export class FootballService {
       ? apiFootballCacheConfig.search
       : apiFootballCacheConfig.fixturesFuture;
 
-    return this.cached('/players', query, cacheConfig);
+    return this.cachedPaginated('/players', query, cacheConfig);
   }
 
   getPlayerSquads(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/players/squads',
       query,
       apiFootballCacheConfig.teamProfile,
@@ -155,7 +273,7 @@ export class FootballService {
   }
 
   getTopScorers(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/players/topscorers',
       query,
       apiFootballCacheConfig.topScorers,
@@ -163,7 +281,7 @@ export class FootballService {
   }
 
   getTopAssists(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/players/topassists',
       query,
       apiFootballCacheConfig.topAssists,
@@ -171,19 +289,31 @@ export class FootballService {
   }
 
   getTransfers(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached('/transfers', query, apiFootballCacheConfig.transfers);
+    return this.cachedPaginated(
+      '/transfers',
+      query,
+      apiFootballCacheConfig.transfers,
+    );
   }
 
   getInjuries(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached('/injuries', query, apiFootballCacheConfig.transfers);
+    return this.cachedPaginated(
+      '/injuries',
+      query,
+      apiFootballCacheConfig.transfers,
+    );
   }
 
   getCoaches(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached('/coachs', query, apiFootballCacheConfig.teamProfile);
+    return this.cachedPaginated(
+      '/coachs',
+      query,
+      apiFootballCacheConfig.teamProfile,
+    );
   }
 
   getTrophies(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/trophies',
       query,
       apiFootballCacheConfig.leagueProfile,
@@ -192,7 +322,7 @@ export class FootballService {
   }
 
   getVenues(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/venues',
       query,
       apiFootballCacheConfig.leagueProfile,
@@ -201,7 +331,7 @@ export class FootballService {
   }
 
   getPredictions(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/predictions',
       query,
       apiFootballCacheConfig.fixturesToday,
@@ -210,7 +340,7 @@ export class FootballService {
   }
 
   getLeaguesSeasons(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/leagues/seasons',
       query,
       apiFootballCacheConfig.leagueProfile,
@@ -218,24 +348,27 @@ export class FootballService {
   }
 
   getPlayerProfiles(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cached(
+    return this.cachedPaginated(
       '/players/profiles',
       query,
       apiFootballCacheConfig.search,
     );
   }
 
-  private toPositiveNumber(
-    value: string | undefined,
-    fallback: number,
-  ): number {
+  private toPositiveNumber(value: unknown, fallback: number): number {
     const parsedValue = Number(value);
 
-    if (!value || Number.isNaN(parsedValue) || parsedValue < 1) {
+    if (
+      value === undefined ||
+      value === null ||
+      value === '' ||
+      Number.isNaN(parsedValue) ||
+      parsedValue < 1
+    ) {
       return fallback;
     }
 
-    return parsedValue;
+    return Math.floor(parsedValue);
   }
 
   async getFixturesGroupedByLeague(query: {
@@ -243,6 +376,7 @@ export class FootballService {
     page?: string;
     limit?: string;
     timezone?: string;
+    statusGroup?: 'ALL' | 'LIVE' | 'UPCOMING' | 'FINISHED';
   }): Promise<{
     date: string;
     timezone: string;
@@ -256,7 +390,7 @@ export class FootballService {
     };
   }> {
     const page = this.toPositiveNumber(query.page, 1);
-    const limit = Math.min(this.toPositiveNumber(query.limit, 10), 100);
+    const limit = this.toPositiveNumber(query.limit, 10);
     const timezone = query.timezone ?? 'Asia/Dhaka';
 
     const fixturesResponse = (await this.getFixtures({
@@ -264,12 +398,15 @@ export class FootballService {
       timezone,
     })) as ApiFootballFixturesResponse;
 
-    const fixtures = fixturesResponse.response ?? [];
+    const fixtures = this.filterFixturesByStatusGroup(
+      fixturesResponse.response ?? [],
+      query.statusGroup ?? 'ALL',
+    );
+
     const groupedMap = new Map<number, LeagueFixturesGroup>();
 
     for (const fixture of fixtures) {
       const leagueId = fixture.league.id;
-
       const existingGroup = groupedMap.get(leagueId);
 
       if (!existingGroup) {
@@ -310,6 +447,10 @@ export class FootballService {
           return leftFirstKickoff - rightFirstKickoff;
         }
 
+        if (left.league.country !== right.league.country) {
+          return left.league.country.localeCompare(right.league.country);
+        }
+
         return left.league.name.localeCompare(right.league.name);
       });
 
@@ -332,9 +473,54 @@ export class FootballService {
     };
   }
 
+  private filterFixturesByStatusGroup(
+    fixtures: NonNullable<ApiFootballFixturesResponse['response']>,
+    statusGroup: 'ALL' | 'LIVE' | 'UPCOMING' | 'FINISHED',
+  ): NonNullable<ApiFootballFixturesResponse['response']> {
+    if (statusGroup === 'ALL') {
+      return fixtures;
+    }
+
+    const liveStatuses = new Set([
+      '1H',
+      'HT',
+      '2H',
+      'ET',
+      'BT',
+      'P',
+      'SUSP',
+      'INT',
+    ]);
+
+    const upcomingStatuses = new Set(['NS', 'TBD']);
+    const finishedStatuses = new Set(['FT', 'AET', 'PEN', 'PSO']);
+
+    return fixtures.filter((fixture) => {
+      const status = fixture.fixture.status.short;
+
+      if (statusGroup === 'LIVE') {
+        return liveStatuses.has(status);
+      }
+
+      if (statusGroup === 'UPCOMING') {
+        return upcomingStatuses.has(status);
+      }
+
+      if (statusGroup === 'FINISHED') {
+        return finishedStatuses.has(status);
+      }
+
+      return true;
+    });
+  }
+
   async searchAll(
     query: string,
-    season: string,
+    options?: {
+      season?: string;
+      page?: string;
+      limit?: string;
+    },
   ): Promise<{
     teams: ApiFootballResponse;
     leagues: ApiFootballResponse;
@@ -348,12 +534,36 @@ export class FootballService {
 
     const search = query.trim();
 
+    const paginationParams = {
+      page: options?.page,
+      limit: options?.limit,
+    };
+
     const [teams, leagues, players] = await Promise.all([
-      this.cached('/teams', { search }, apiFootballCacheConfig.search),
-      this.cached('/leagues', { search }, apiFootballCacheConfig.search),
-      this.cached(
+      this.cachedPaginated(
+        '/teams',
+        {
+          search,
+          ...paginationParams,
+        },
+        apiFootballCacheConfig.search,
+      ),
+
+      this.cachedPaginated(
+        '/leagues',
+        {
+          search,
+          ...paginationParams,
+        },
+        apiFootballCacheConfig.search,
+      ),
+
+      this.cachedPaginated(
         '/players/profiles',
-        { search },
+        {
+          search,
+          ...paginationParams,
+        },
         apiFootballCacheConfig.search,
       ),
     ]);

@@ -84,3 +84,15 @@ export interface LeagueFixturesGroup {
   matchCount: number;
   fixtures: ApiFootballFixture[];
 }
+
+export interface FixturesByTimeResponse {
+  date: string;
+  timezone: string;
+  items: ApiFootballFixturesResponse['response'];
+  meta: {
+    page: number;
+    limit: number;
+    totalFixtures: number;
+    totalPages: number;
+  };
+}

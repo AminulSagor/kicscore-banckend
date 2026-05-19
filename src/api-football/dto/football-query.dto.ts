@@ -176,4 +176,14 @@ export class FootballQueryDto {
   @Transform(trimString)
   @Matches(NUMBER_LIST_REGEX)
   h2h?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @Matches(NUMBER_REGEX)
+  page?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @Matches(NUMBER_REGEX)
+  limit?: string;
 }

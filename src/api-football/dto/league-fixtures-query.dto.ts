@@ -1,5 +1,11 @@
 import { Transform } from 'class-transformer';
-import { IsDateString, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 const trimString = ({ value }: { value: unknown }): unknown => {
   if (typeof value !== 'string') {
@@ -8,6 +14,15 @@ const trimString = ({ value }: { value: unknown }): unknown => {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const uppercaseString = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.toUpperCase() : undefined;
 };
 
 export class LeagueFixturesQueryDto {
@@ -30,4 +45,9 @@ export class LeagueFixturesQueryDto {
   @IsString()
   @MaxLength(120)
   timezone?: string;
+
+  @IsOptional()
+  @Transform(uppercaseString)
+  @IsIn(['ALL', 'LIVE', 'UPCOMING', 'FINISHED'])
+  statusGroup?: 'ALL' | 'LIVE' | 'UPCOMING' | 'FINISHED';
 }

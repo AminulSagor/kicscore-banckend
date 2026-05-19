@@ -3,7 +3,7 @@ import { RedisService } from '../redis/redis.service';
 import { ApiFootballClient } from './api-football.client';
 import { ApiFootballRequestPriority } from './enums/api-football-request-priority.enum';
 
-type QueryParams = Record<string, string | number | boolean | undefined>;
+export type QueryParams = Record<string, string | number | boolean | undefined>;
 
 interface CachedApiOptions<T> {
   endpoint: string;
