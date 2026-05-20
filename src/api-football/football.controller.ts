@@ -1,5 +1,18 @@
-import { Controller, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Headers,
+  Param,
+  ParseIntPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+
 import { Public } from '../common/decorators/public.decorator';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import { OptionalJwtAuthGuard } from 'src/modules/auth/guards/optional-jwt-auth.guard';
+import type { JwtPayload } from 'src/modules/auth/types/jwt-payload.type';
+
 import { FootballService } from './football.service';
 import { SearchQueryDto } from './dto/football-filters.dto';
 import { FootballQueryDto } from './dto/football-query.dto';
@@ -7,6 +20,7 @@ import { LeagueFixturesQueryDto } from './dto/league-fixtures-query.dto';
 import { FootballCompositeService } from './football-composite.service';
 import { FootballCompositeQueryDto } from './dto/football-composite-query.dto';
 import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.enum';
+import { FootballLeaguesByIdsQueryDto } from './dto/football-leagues-by-ids-query.dto';
 
 @Public()
 @Controller('football')
@@ -15,6 +29,20 @@ export class FootballController {
     private readonly footballService: FootballService,
     private readonly footballCompositeService: FootballCompositeService,
   ) {}
+
+  private buildFollowContext(
+    user: JwtPayload | null,
+    installationId: string | undefined,
+    entityType: FollowEntityType,
+    entityId: string,
+  ) {
+    return {
+      userId: user?.sub ?? null,
+      installationId: installationId ?? null,
+      entityType,
+      entityId,
+    };
+  }
 
   @Get('fixtures/live')
   getLiveFixtures() {
@@ -56,9 +84,24 @@ export class FootballController {
     return this.footballService.getFixturePlayers(String(fixtureId));
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('fixtures/:fixtureId')
-  getFixtureById(@Param('fixtureId', ParseIntPipe) fixtureId: number) {
-    return this.footballService.getFixtureById(String(fixtureId));
+  async getFixtureById(
+    @Param('fixtureId', ParseIntPipe) fixtureId: number,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
+  ) {
+    const data = await this.footballService.getFixtureById(String(fixtureId));
+
+    return this.footballCompositeService.withFollowMeta(
+      data as Record<string, unknown>,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.FIXTURE,
+        String(fixtureId),
+      ),
+    );
   }
 
   @Get('fixtures')
@@ -74,31 +117,64 @@ export class FootballController {
     return this.footballService.getTeamFixtures(String(teamId), query);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('teams/:teamId/overview')
   getTeamOverview(
     @Param('teamId', ParseIntPipe) teamId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
-    return this.footballCompositeService.getTeamOverview(String(teamId), query);
+    return this.footballCompositeService.getTeamOverview(
+      String(teamId),
+      query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.TEAM,
+        String(teamId),
+      ),
+    );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('teams/:teamId/top-players')
   getTeamTopPlayers(
     @Param('teamId', ParseIntPipe) teamId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getTeamTopPlayers(
       String(teamId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.TEAM,
+        String(teamId),
+      ),
     );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('teams/:teamId/about')
   getTeamAbout(
     @Param('teamId', ParseIntPipe) teamId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
-    return this.footballCompositeService.getTeamAbout(String(teamId), query);
+    return this.footballCompositeService.getTeamAbout(
+      String(teamId),
+      query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.TEAM,
+        String(teamId),
+      ),
+    );
   }
 
   @Get('teams/:teamId/trophies-preview')
@@ -112,9 +188,28 @@ export class FootballController {
     );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('teams')
-  getTeams(@Query() query: FootballQueryDto) {
-    return this.footballService.getTeams(query);
+  async getTeams(
+    @Query() query: FootballQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
+  ) {
+    const data = await this.footballService.getTeams(query);
+
+    if (!query.id) {
+      return data;
+    }
+
+    return this.footballCompositeService.withFollowMeta(
+      data as Record<string, unknown>,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.TEAM,
+        String(query.id),
+      ),
+    );
   }
 
   @Get('league')
@@ -122,9 +217,28 @@ export class FootballController {
     return this.footballService.getFixturesGroupedByLeague(query);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('leagues')
-  getLeagues(@Query() query: FootballQueryDto) {
-    return this.footballService.getLeagues(query);
+  async getLeagues(
+    @Query() query: FootballQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
+  ) {
+    const data = await this.footballService.getLeagues(query);
+
+    if (!query.id) {
+      return data;
+    }
+
+    return this.footballCompositeService.withFollowMeta(
+      data as Record<string, unknown>,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.LEAGUE,
+        String(query.id),
+      ),
+    );
   }
 
   @Get('countries')
@@ -157,52 +271,107 @@ export class FootballController {
     return this.footballService.getPlayerProfiles(query);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('players')
-  getPlayers(@Query() query: FootballQueryDto) {
-    return this.footballService.getPlayers(query);
+  async getPlayers(
+    @Query() query: FootballQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
+  ) {
+    const data = await this.footballService.getPlayers(query);
+
+    if (!query.id) {
+      return data;
+    }
+
+    return this.footballCompositeService.withFollowMeta(
+      data as Record<string, unknown>,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.PLAYER,
+        String(query.id),
+      ),
+    );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('players/:playerId/recent-matches')
   getPlayerRecentMatches(
     @Param('playerId', ParseIntPipe) playerId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getPlayerRecentMatches(
       String(playerId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.PLAYER,
+        String(playerId),
+      ),
     );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('players/:playerId/career-totals')
   getPlayerCareerTotals(
     @Param('playerId', ParseIntPipe) playerId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getPlayerCareerTotals(
       String(playerId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.PLAYER,
+        String(playerId),
+      ),
     );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('players/:playerId/traits')
   getPlayerTraits(
     @Param('playerId', ParseIntPipe) playerId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getPlayerTraits(
       String(playerId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.PLAYER,
+        String(playerId),
+      ),
     );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('players/:playerId/trophies/grouped')
   getGroupedPlayerTrophies(
     @Param('playerId', ParseIntPipe) playerId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getGroupedPlayerTrophies(
       String(playerId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.PLAYER,
+        String(playerId),
+      ),
     );
   }
 
@@ -216,31 +385,68 @@ export class FootballController {
     return this.footballService.getInjuries(query);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('coaches/:coachId/current-record')
   getCoachCurrentRecord(
     @Param('coachId', ParseIntPipe) coachId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getCoachCurrentRecord(
       String(coachId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.COACH,
+        String(coachId),
+      ),
     );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('coaches/:coachId/trophies/grouped')
   getGroupedCoachTrophies(
     @Param('coachId', ParseIntPipe) coachId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getGroupedCoachTrophies(
       String(coachId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.COACH,
+        String(coachId),
+      ),
     );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('coaches')
-  getCoaches(@Query() query: FootballQueryDto) {
-    return this.footballService.getCoaches(query);
+  async getCoaches(
+    @Query() query: FootballQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
+  ) {
+    const data = await this.footballService.getCoaches(query);
+
+    if (!query.id) {
+      return data;
+    }
+
+    return this.footballCompositeService.withFollowMeta(
+      data as Record<string, unknown>,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.COACH,
+        String(query.id),
+      ),
+    );
   }
 
   @Get('trophies')
@@ -283,6 +489,11 @@ export class FootballController {
     return this.footballCompositeService.getTopLeagues(query);
   }
 
+  @Get('leagues/by-ids')
+  getLeaguesByIds(@Query() query: FootballLeaguesByIdsQueryDto) {
+    return this.footballCompositeService.getLeaguesByIds(query);
+  }
+
   @Get('leagues/by-country')
   getLeaguesByCountry(@Query() query: FootballCompositeQueryDto) {
     return this.footballCompositeService.getLeaguesByCountry(query);
@@ -293,19 +504,41 @@ export class FootballController {
     return this.footballService.getLeaguesSeasons(query);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('matches/:fixtureId/about')
-  getMatchAbout(@Param('fixtureId', ParseIntPipe) fixtureId: number) {
-    return this.footballCompositeService.getMatchAbout(String(fixtureId));
+  getMatchAbout(
+    @Param('fixtureId', ParseIntPipe) fixtureId: number,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
+  ) {
+    return this.footballCompositeService.getMatchAbout(
+      String(fixtureId),
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.FIXTURE,
+        String(fixtureId),
+      ),
+    );
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('matches/:fixtureId/knockout-bracket')
   getKnockoutBracket(
     @Param('fixtureId', ParseIntPipe) fixtureId: number,
     @Query() query: FootballCompositeQueryDto,
+    @CurrentUser() user: JwtPayload | null,
+    @Headers('x-installation-id') installationId?: string,
   ) {
     return this.footballCompositeService.getKnockoutBracket(
       String(fixtureId),
       query,
+      this.buildFollowContext(
+        user,
+        installationId,
+        FollowEntityType.FIXTURE,
+        String(fixtureId),
+      ),
     );
   }
 

@@ -11,8 +11,25 @@ import {
   StandingRow,
   TeamProfileItem,
 } from 'src/common/interfaces/api-football-custom-response.interface';
+import { FollowContext } from 'src/modules/follows/types/follow-context.type';
+import { TOP_LEAGUE_IDS_PARAM } from 'src/common/constants/top-league-ids.constant';
+import { FootballLeaguesByIdsQueryDto } from './dto/football-leagues-by-ids-query.dto';
 
-type ApiFootballResponse = unknown;
+type PlayerStatistic = NonNullable<PlayerStatsItem['statistics']>[number];
+
+type FollowMeta = {
+  isFollowed: boolean;
+  entityType: FollowEntityType;
+  entityId: string;
+};
+
+type LeagueProfileItem = {
+  league?: {
+    id?: number;
+    name?: string;
+  };
+  [key: string]: unknown;
+};
 
 interface ApiFootballWrapped<T> {
   response?: T[];
@@ -25,6 +42,39 @@ export class FootballCompositeService {
     private readonly footballService: FootballService,
     private readonly followsService: FollowsService,
   ) {}
+
+  async withFollowMeta<T extends object>(
+    data: T,
+    context?: FollowContext,
+  ): Promise<T & { follow: FollowMeta | null }> {
+    const follow = await this.buildFollowMeta(context);
+
+    return {
+      ...data,
+      follow,
+    };
+  }
+
+  private async buildFollowMeta(
+    context?: FollowContext,
+  ): Promise<FollowMeta | null> {
+    if (!context) {
+      return null;
+    }
+
+    const isFollowed = await this.followsService.isEntityFollowed({
+      userId: context.userId,
+      installationId: context.installationId,
+      entityType: context.entityType,
+      entityId: context.entityId,
+    });
+
+    return {
+      isFollowed,
+      entityType: context.entityType,
+      entityId: context.entityId,
+    };
+  }
 
   private findTeamStandingRow(
     standingsData: unknown,
@@ -183,120 +233,107 @@ export class FootballCompositeService {
     leaguePlayers: PlayerStatsItem[],
   ) {
     const playerStats = player.statistics?.[0];
+    const metrics = this.buildPlayerTraitMetrics(playerStats);
 
-    const metrics = {
-      attacking:
-        (playerStats?.goals?.total ?? 0) * 4 +
-        (playerStats?.shots?.on ?? 0) * 1.5 +
-        (playerStats?.dribbles?.success ?? 0),
+    return [
+      {
+        key: 'defensiveContribution',
+        label: 'DEFENSIVE CONTRIB.',
+        score: this.normalizeScore(metrics.defensiveContributionPer90, 4),
+        rawValue: metrics.defensiveContributionPer90,
+        sourceMetric: 'tackles + interceptions per 90',
+      },
+      {
+        key: 'goals',
+        label: 'GOALS',
+        score: this.normalizeScore(metrics.goalsPer90, 0.8),
+        rawValue: metrics.goalsPer90,
+        sourceMetric: 'goals per 90',
+      },
+      {
+        key: 'shotAttempts',
+        label: 'SHOT ATTEMPTS',
+        score: this.normalizeScore(metrics.shotsPer90, 4),
+        rawValue: metrics.shotsPer90,
+        sourceMetric: 'shots.total per 90',
+      },
+      {
+        key: 'touches',
+        label: 'TOUCHES',
+        score: this.normalizeScore(metrics.touchesPer90, 70),
+        rawValue: metrics.touchesPer90,
+        sourceMetric: 'passes.total per 90 proxy',
+      },
+      {
+        key: 'chancesCreated',
+        label: 'CHANCES CREATED',
+        score: this.normalizeScore(metrics.chancesCreatedPer90, 3),
+        rawValue: metrics.chancesCreatedPer90,
+        sourceMetric: 'assists + key passes per 90',
+      },
+      {
+        key: 'aerialWon',
+        label: 'AERIAL WON',
+        score: this.normalizeScore(metrics.aerialWonPer90, 5),
+        rawValue: metrics.aerialWonPer90,
+        sourceMetric: 'duels.won per 90 proxy',
+      },
+    ];
+  }
 
-      creativity:
-        (playerStats?.goals?.assists ?? 0) * 4 +
-        (playerStats?.passes?.key ?? 0) * 2,
+  private buildPlayerTraitMetrics(statistics?: PlayerStatistic) {
+    const minutes = statistics?.games?.minutes ?? 0;
+    const per90Base = minutes > 0 ? minutes / 90 : 1;
 
-      passing:
-        (playerStats?.passes?.accuracy ?? 0) +
-        (playerStats?.passes?.total ?? 0) / 20,
-
-      defending:
-        (playerStats?.tackles?.total ?? 0) * 2 +
-        (playerStats?.tackles?.interceptions ?? 0) * 2 +
-        (playerStats?.duels?.won ?? 0),
-
-      discipline: Math.max(
-        0,
-        100 -
-          (playerStats?.cards?.yellow ?? 0) * 5 -
-          (playerStats?.cards?.red ?? 0) * 20,
-      ),
-
-      availability: Math.min((playerStats?.games?.appearances ?? 0) * 4, 100),
-    };
-
-    const leagueMetricRows = leaguePlayers.map((leaguePlayer) => {
-      const stats = leaguePlayer.statistics?.[0];
-
-      return {
-        attacking:
-          (stats?.goals?.total ?? 0) * 4 +
-          (stats?.shots?.on ?? 0) * 1.5 +
-          (stats?.dribbles?.success ?? 0),
-
-        creativity:
-          (stats?.goals?.assists ?? 0) * 4 + (stats?.passes?.key ?? 0) * 2,
-
-        passing:
-          (stats?.passes?.accuracy ?? 0) + (stats?.passes?.total ?? 0) / 20,
-
-        defending:
-          (stats?.tackles?.total ?? 0) * 2 +
-          (stats?.tackles?.interceptions ?? 0) * 2 +
-          (stats?.duels?.won ?? 0),
-
-        discipline: Math.max(
-          0,
-          100 - (stats?.cards?.yellow ?? 0) * 5 - (stats?.cards?.red ?? 0) * 20,
-        ),
-
-        availability: Math.min((stats?.games?.appearances ?? 0) * 4, 100),
-      };
-    });
+    const goals = statistics?.goals?.total ?? 0;
+    const assists = statistics?.goals?.assists ?? 0;
+    const keyPasses = statistics?.passes?.key ?? 0;
+    const shots = statistics?.shots?.total ?? 0;
+    const passes = statistics?.passes?.total ?? 0;
+    const tackles = statistics?.tackles?.total ?? 0;
+    const interceptions = statistics?.tackles?.interceptions ?? 0;
+    const duelsWon = statistics?.duels?.won ?? 0;
 
     return {
-      attacking: this.percentile(
-        metrics.attacking,
-        leagueMetricRows.map((row) => row.attacking),
+      defensiveContributionPer90: this.roundToOne(
+        (tackles + interceptions) / per90Base,
       ),
-      creativity: this.percentile(
-        metrics.creativity,
-        leagueMetricRows.map((row) => row.creativity),
-      ),
-      passing: this.percentile(
-        metrics.passing,
-        leagueMetricRows.map((row) => row.passing),
-      ),
-      defending: this.percentile(
-        metrics.defending,
-        leagueMetricRows.map((row) => row.defending),
-      ),
-      discipline: this.percentile(
-        metrics.discipline,
-        leagueMetricRows.map((row) => row.discipline),
-      ),
-      availability: this.percentile(
-        metrics.availability,
-        leagueMetricRows.map((row) => row.availability),
-      ),
+      goalsPer90: this.roundToOne(goals / per90Base),
+      shotsPer90: this.roundToOne(shots / per90Base),
+      touchesPer90: this.roundToOne(passes / per90Base),
+      chancesCreatedPer90: this.roundToOne((assists + keyPasses) / per90Base),
+      aerialWonPer90: this.roundToOne(duelsWon / per90Base),
     };
   }
 
-  private percentile(value: number, values: number[]): number {
-    if (!values.length) {
+  private normalizeScore(value: number, eliteBenchmark: number): number {
+    if (eliteBenchmark <= 0) {
       return 0;
     }
 
-    const lowerOrEqual = values.filter((item) => item <= value).length;
+    return Math.min(Math.round((value / eliteBenchmark) * 100), 100);
+  }
 
-    return Math.round((lowerOrEqual / values.length) * 100);
+  private roundToOne(value: number): number {
+    return Math.round(value * 10) / 10;
   }
 
   private buildPlayerTraitsSummary(
     player: PlayerStatsItem,
-    traits: {
-      attacking: number;
-      creativity: number;
-      passing: number;
-      defending: number;
-      discipline: number;
-      availability: number;
-    },
+    traits: Array<{
+      key: string;
+      label: string;
+      score: number;
+      rawValue: number;
+      sourceMetric: string;
+    }>,
   ): string {
     const playerName = player.player?.name ?? 'This player';
     const nationality = player.player?.nationality;
     const position = player.player?.position;
 
-    const bestTrait = Object.entries(traits).sort((left, right) => {
-      return right[1] - left[1];
+    const bestTrait = [...traits].sort((left, right) => {
+      return right.score - left.score;
     })[0];
 
     let summary = `${playerName}`;
@@ -309,10 +346,10 @@ export class FootballCompositeService {
       summary += ` is listed as a ${position}`;
     }
 
-    summary += `.`;
+    summary += '.';
 
     if (bestTrait) {
-      summary += ` Their strongest current trait is ${bestTrait[0]}, rated at ${bestTrait[1]} out of 100 compared with players in the selected league.`;
+      summary += ` Their strongest current trait is ${bestTrait.label.toLowerCase()}, rated at ${bestTrait.score}% compared with players in the selected league.`;
     }
 
     return summary;
@@ -330,12 +367,124 @@ export class FootballCompositeService {
     return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
   }
 
+  private parseNumberList(value: string): number[] {
+    return [
+      ...new Set(
+        value
+          .split('-')
+          .map((item) => Number(item))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    ];
+  }
+
+  private sortLeagueProfilesByIds(
+    leagues: LeagueProfileItem[],
+    ids: number[],
+  ): LeagueProfileItem[] {
+    const orderMap = new Map(
+      ids.map((id, index): [number, number] => [id, index]),
+    );
+
+    return [...leagues].sort((left, right) => {
+      const leftOrder = orderMap.get(left.league?.id ?? 0) ?? ids.length;
+      const rightOrder = orderMap.get(right.league?.id ?? 0) ?? ids.length;
+
+      return leftOrder - rightOrder;
+    });
+  }
+
+  private buildLeagueListResponse(
+    leagues: LeagueProfileItem[],
+    ids: number[],
+    query: FootballCompositeQueryDto | FootballLeaguesByIdsQueryDto,
+  ) {
+    const sortedLeagues = this.sortLeagueProfilesByIds(leagues, ids);
+    const page = this.toPositiveNumber(query.page, 1);
+    const limit = this.toPositiveNumber(query.limit, 20);
+    const totalItems = sortedLeagues.length;
+    const startIndex = (page - 1) * limit;
+    const response = sortedLeagues.slice(startIndex, startIndex + limit);
+
+    return {
+      get: 'leagues',
+      parameters: {
+        ids: ids.join('-'),
+        ...(query.season ? { season: query.season } : {}),
+        ...(query.current ? { current: query.current } : {}),
+      },
+      errors: [],
+      results: response.length,
+      paging: {
+        current: 1,
+        total: 1,
+      },
+      response,
+      backendPaging: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+    };
+  }
+
+  private async getLeagueProfilesByIds(
+    query: FootballLeaguesByIdsQueryDto,
+  ): Promise<LeagueProfileItem[]> {
+    const ids = this.parseNumberList(query.ids);
+    const leagueMap = new Map<number, LeagueProfileItem>();
+
+    const leagueResponses = await Promise.all(
+      ids.map((id) => {
+        return this.footballService.getLeagues({
+          id: String(id),
+          season: query.season,
+          current: query.current,
+        });
+      }),
+    );
+
+    for (const leagueResponse of leagueResponses) {
+      const leagues =
+        (leagueResponse as ApiFootballWrapped<LeagueProfileItem>).response ??
+        [];
+
+      for (const league of leagues) {
+        const leagueId = league.league?.id;
+
+        if (leagueId) {
+          leagueMap.set(leagueId, league);
+        }
+      }
+    }
+
+    return this.sortLeagueProfilesByIds(Array.from(leagueMap.values()), ids);
+  }
+
   async getTopLeagues(query: FootballCompositeQueryDto) {
-    return this.getPopularEntities({
-      entityType: FollowEntityType.LEAGUE,
+    const ids = this.parseNumberList(TOP_LEAGUE_IDS_PARAM);
+    const leagues = await this.getLeagueProfilesByIds({
+      ids: TOP_LEAGUE_IDS_PARAM,
+      season: query.season,
+      current: undefined,
       page: query.page,
       limit: query.limit,
     });
+
+    return this.buildLeagueListResponse(leagues, ids, {
+      ids: TOP_LEAGUE_IDS_PARAM,
+      season: query.season,
+      page: query.page,
+      limit: query.limit,
+    });
+  }
+
+  async getLeaguesByIds(query: FootballLeaguesByIdsQueryDto) {
+    const ids = this.parseNumberList(query.ids);
+    const leagues = await this.getLeagueProfilesByIds(query);
+
+    return this.buildLeagueListResponse(leagues, ids, query);
   }
 
   async getLeaguesByCountry(query: FootballCompositeQueryDto) {
@@ -392,20 +541,20 @@ export class FootballCompositeService {
     return this.paginateArray(sorted, query.page, query.limit);
   }
 
-  async getMatchAbout(fixtureId: string) {
+  async getMatchAbout(fixtureId: string, followContext?: FollowContext) {
     const fixtureData = await this.footballService.getFixtureById(fixtureId);
 
     const fixture = (fixtureData as ApiFootballWrapped<FixtureItem>)
       .response?.[0];
 
     if (!fixture) {
-      return {
-        fixtureId,
-        about: 'Match information is not available yet.',
-        source: {
-          fixture: fixtureData,
+      return this.withFollowMeta(
+        {
+          fixtureId,
+          about: 'Match information is not available yet.',
         },
-      };
+        followContext,
+      );
     }
 
     const homeTeam = fixture.teams?.home;
@@ -479,35 +628,39 @@ export class FootballCompositeService {
       aboutParts.push(h2hSummary);
     }
 
-    return {
-      fixtureId,
-      about: aboutParts.join(' '),
-      source: {
-        fixture: fixtureData,
-        headToHead: h2h,
+    return this.withFollowMeta(
+      {
+        fixtureId,
+        about: aboutParts.join(' '),
       },
-    };
+      followContext,
+    );
   }
 
   async getKnockoutBracket(
     fixtureId: string,
     query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
   ) {
     if (!query.league || !query.season) {
-      return {
-        fixtureId,
-        rounds: [],
-        message: 'league and season are required',
-      };
+      return this.withFollowMeta(
+        {
+          fixtureId,
+          rounds: [],
+          message: 'league and season are required',
+        },
+        followContext,
+      );
     }
 
     const leagueId = String(query.league);
 
-    if (leagueId === '1') {
-      return this.getWorldCupKnockoutBracket(fixtureId, query);
-    }
+    const data =
+      leagueId === '1'
+        ? await this.getWorldCupKnockoutBracket(fixtureId, query)
+        : await this.getGenericKnockoutBracket(fixtureId, query);
 
-    return this.getGenericKnockoutBracket(fixtureId, query);
+    return this.withFollowMeta(data, followContext);
   }
 
   private async getWorldCupKnockoutBracket(
@@ -626,28 +779,42 @@ export class FootballCompositeService {
     };
   }
 
-  async getTeamOverview(teamId: string, query: FootballCompositeQueryDto) {
-    const [team, nextMatch, lastMatches, leagues, standings, squad, coach] =
-      await Promise.all([
-        this.footballService.getTeams({ id: teamId }),
-        this.footballService.getTeamFixtures(teamId, { next: '1' }),
-        this.footballService.getTeamFixtures(teamId, { last: '6' }),
-        this.footballService.getLeagues({
-          team: teamId,
-          season: query.season,
-        }),
-        query.league && query.season
-          ? this.footballService.getStandings({
-              league: query.league,
-              season: query.season,
-            })
-          : Promise.resolve(null),
-        this.footballService.getPlayerSquads({ team: teamId }),
-        this.footballService.getCoaches({ team: teamId }),
-      ]);
+  async getTeamOverview(
+    teamId: string,
+    query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
+  ) {
+    const [
+      team,
+      nextMatch,
+      lastMatches,
+      leagues,
+      standings,
+      squad,
+      coach,
+      follow,
+    ] = await Promise.all([
+      this.footballService.getTeams({ id: teamId }),
+      this.footballService.getTeamFixtures(teamId, { next: '1' }),
+      this.footballService.getTeamFixtures(teamId, { last: '6' }),
+      this.footballService.getLeagues({
+        team: teamId,
+        season: query.season,
+      }),
+      query.league && query.season
+        ? this.footballService.getStandings({
+            league: query.league,
+            season: query.season,
+          })
+        : Promise.resolve(null),
+      this.footballService.getPlayerSquads({ team: teamId }),
+      this.footballService.getCoaches({ team: teamId }),
+      this.buildFollowMeta(followContext),
+    ]);
 
     return {
       teamId,
+      follow,
       team,
       nextMatch,
       lastMatches,
@@ -658,7 +825,11 @@ export class FootballCompositeService {
     };
   }
 
-  async getTeamTopPlayers(teamId: string, query: FootballCompositeQueryDto) {
+  async getTeamTopPlayers(
+    teamId: string,
+    query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
+  ) {
     const players = (await this.footballService.getPlayers({
       team: teamId,
       season: query.season,
@@ -678,10 +849,16 @@ export class FootballCompositeService {
       return rightGoals - leftGoals;
     });
 
-    return this.paginateArray(sorted, query.page, query.limit);
+    const result = this.paginateArray(sorted, query.page, query.limit);
+
+    return this.withFollowMeta(result, followContext);
   }
 
-  async getTeamAbout(teamId: string, query: FootballCompositeQueryDto) {
+  async getTeamAbout(
+    teamId: string,
+    query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
+  ) {
     const [teamData, lastMatchesData, leaguesData, squadData, coachData] =
       await Promise.all([
         this.footballService.getTeams({ id: teamId }),
@@ -804,15 +981,16 @@ export class FootballCompositeService {
     return {
       teamId,
       about: aboutParts.join(' '),
-      source: {
-        team: teamData,
-        lastMatches: lastMatchesData,
-        standings: standingsData,
-        leagues: leaguesData,
-        squad: squadData,
-        coach: coachData,
-        playerStats: playerStatsData,
-      },
+      followContext,
+      // source: {
+      //   team: teamData,
+      //   lastMatches: lastMatchesData,
+      //   standings: standingsData,
+      //   leagues: leaguesData,
+      //   squad: squadData,
+      //   coach: coachData,
+      //   playerStats: playerStatsData,
+      // },
     };
   }
 
@@ -848,13 +1026,17 @@ export class FootballCompositeService {
   async getPlayerRecentMatches(
     playerId: string,
     query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
   ) {
     if (!query.team) {
-      return {
-        playerId,
-        items: [],
-        message: 'team is required to fetch recent player matches',
-      };
+      return this.withFollowMeta(
+        {
+          playerId,
+          items: [],
+          message: 'team is required to fetch recent player matches',
+        },
+        followContext,
+      );
     }
 
     const fixtures = await this.footballService.getTeamFixtures(query.team, {
@@ -863,16 +1045,20 @@ export class FootballCompositeService {
       limit: query.limit,
     });
 
-    return {
-      playerId,
-      teamId: query.team,
-      fixtures,
-    };
+    return this.withFollowMeta(
+      {
+        playerId,
+        teamId: query.team,
+        fixtures,
+      },
+      followContext,
+    );
   }
 
   async getPlayerCareerTotals(
     playerId: string,
     query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
   ) {
     const fromSeason = Number(query.fromSeason ?? 2020);
     const toSeason = Number(query.toSeason ?? new Date().getFullYear());
@@ -896,17 +1082,27 @@ export class FootballCompositeService {
       }),
     );
 
-    return this.paginateArray(rows, query.page, query.limit);
+    return this.withFollowMeta(
+      this.paginateArray(rows, query.page, query.limit),
+      followContext,
+    );
   }
 
-  async getPlayerTraits(playerId: string, query: FootballCompositeQueryDto) {
+  async getPlayerTraits(
+    playerId: string,
+    query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
+  ) {
     if (!query.league || !query.season) {
-      return {
-        playerId,
-        traits: null,
-        about: null,
-        message: 'league and season are required',
-      };
+      return this.withFollowMeta(
+        {
+          playerId,
+          traits: null,
+          about: null,
+          message: 'league and season are required',
+        },
+        followContext,
+      );
     }
 
     const [playerData, leaguePlayersData] = await Promise.all([
@@ -929,63 +1125,73 @@ export class FootballCompositeService {
       (leaguePlayersData as ApiFootballWrapped<PlayerStatsItem>).response ?? [];
 
     if (!player) {
-      return {
-        playerId,
-        traits: null,
-        about: 'Player data is not available for this season.',
-        source: {
-          player: playerData,
-          leaguePlayers: leaguePlayersData,
+      return this.withFollowMeta(
+        {
+          playerId,
+          traits: null,
+          about: 'Player data is not available for this season.',
         },
-      };
+        followContext,
+      );
     }
 
     const traits = this.calculatePlayerTraits(player, leaguePlayers);
     const about = this.buildPlayerTraitsSummary(player, traits);
 
-    return {
-      playerId,
-      about,
-      traits,
-      source: {
-        player: playerData,
-        leaguePlayers: leaguePlayersData,
+    return this.withFollowMeta(
+      {
+        playerId,
+        about,
+        traits,
       },
-    };
+      followContext,
+    );
   }
 
   async getGroupedPlayerTrophies(
     playerId: string,
     query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
   ) {
     const trophies = (await this.footballService.getTrophies({
       player: playerId,
     })) as ApiFootballWrapped<any>;
 
-    return this.groupTrophies(trophies.response ?? [], query.page, query.limit);
+    return this.withFollowMeta(
+      this.groupTrophies(trophies.response ?? [], query.page, query.limit),
+      followContext,
+    );
   }
 
   async getGroupedCoachTrophies(
     coachId: string,
     query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
   ) {
     const trophies = (await this.footballService.getTrophies({
       coach: coachId,
     })) as ApiFootballWrapped<any>;
 
-    return this.groupTrophies(trophies.response ?? [], query.page, query.limit);
+    return this.withFollowMeta(
+      this.groupTrophies(trophies.response ?? [], query.page, query.limit),
+      followContext,
+    );
   }
 
   async getCoachCurrentRecord(
     coachId: string,
     query: FootballCompositeQueryDto,
+    followContext?: FollowContext,
   ) {
     if (!query.team || !query.from || !query.to) {
-      return {
-        coachId,
-        record: null,
-        message: 'team, from, and to are required',
-      };
+      return this.withFollowMeta(
+        {
+          coachId,
+          record: null,
+          message: 'team, from, and to are required',
+        },
+        followContext,
+      );
     }
 
     const fixtures = (await this.footballService.getTeamFixtures(query.team, {
@@ -1017,18 +1223,21 @@ export class FootballCompositeService {
       }
     }
 
-    return {
-      coachId,
-      teamId: query.team,
-      from: query.from,
-      to: query.to,
-      record: {
-        matches: response.length,
-        wins,
-        draws,
-        losses,
+    return this.withFollowMeta(
+      {
+        coachId,
+        teamId: query.team,
+        from: query.from,
+        to: query.to,
+        record: {
+          matches: response.length,
+          wins,
+          draws,
+          losses,
+        },
       },
-    };
+      followContext,
+    );
   }
 
   private groupTrophies(items: any[], page?: string, limit?: string) {
