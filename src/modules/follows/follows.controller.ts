@@ -130,4 +130,20 @@ export class FollowsController {
       data,
     };
   }
+
+  // @Post('merge-anonymous')
+  // async mergeAnonymousFollows(
+  //   @CurrentUser() user: JwtPayload,
+  //   @Body() dto: { installationId: string },
+  // ) {
+  //   const data = await this.followsService.mergeAnonymousFollowsToUser({
+  //     userId: user.sub,
+  //     installationId: dto.installationId,
+  //   });
+
+  //   return {
+  //     message: 'Anonymous follows merged successfully',
+  //     data,
+  //   };
+  // }
 }

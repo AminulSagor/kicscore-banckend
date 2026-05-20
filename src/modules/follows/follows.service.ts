@@ -355,4 +355,91 @@ export class FollowsService {
       installationId: owner.installationId ?? IsNull(),
     };
   }
+
+  async isEntityFollowed(params: {
+    userId?: string | null;
+    installationId?: string | null;
+    entityType: FollowEntityType;
+    entityId: string;
+  }): Promise<boolean> {
+    if (!params.userId && !params.installationId) {
+      return false;
+    }
+
+    const follow = await this.followRepository.findOne({
+      where: [
+        ...(params.userId
+          ? [
+              {
+                userId: params.userId,
+                entityType: params.entityType,
+                entityId: params.entityId,
+                isActive: true,
+              },
+            ]
+          : []),
+        ...(params.installationId
+          ? [
+              {
+                installationId: params.installationId,
+                entityType: params.entityType,
+                entityId: params.entityId,
+                isActive: true,
+              },
+            ]
+          : []),
+      ],
+    });
+
+    return Boolean(follow);
+  }
+
+  //   async mergeAnonymousFollowsToUser(params: {
+  //   installationId: string;
+  //   userId: string;
+  // }): Promise<{ mergedCount: number; skippedCount: number }> {
+  //   const anonymousFollows = await this.followRepository.find({
+  //     where: {
+  //       installationId: params.installationId,
+  //       userId: IsNull(),
+  //       isActive: true,
+  //     },
+  //     relations: {
+  //       entitySnapshot: true,
+  //     },
+  //   });
+
+  //   let mergedCount = 0;
+  //   let skippedCount = 0;
+
+  //   for (const anonymousFollow of anonymousFollows) {
+  //     const existingUserFollow = await this.followRepository.findOne({
+  //       where: {
+  //         userId: params.userId,
+  //         entityType: anonymousFollow.entityType,
+  //         entityId: anonymousFollow.entityId,
+  //         isActive: true,
+  //       },
+  //     });
+
+  //     if (existingUserFollow) {
+  //       anonymousFollow.isActive = false;
+  //       await this.followRepository.save(anonymousFollow);
+  //       skippedCount += 1;
+  //       continue;
+  //     }
+
+  //     anonymousFollow.userId = params.userId;
+  //     anonymousFollow.installationId = params.installationId;
+  //     anonymousFollow.isActive = true;
+
+  //     await this.followRepository.save(anonymousFollow);
+  //     mergedCount += 1;
+  //   }
+
+  //   return {
+  //     mergedCount,
+  //     skippedCount,
+  //   };
+  // }
 }
