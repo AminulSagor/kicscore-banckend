@@ -288,11 +288,19 @@ export class FootballService {
     );
   }
 
-  getTopCards(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cachedPaginated(
-      '/players/topcards',
+  // getTopCards(query: QueryParams): Promise<ApiFootballResponse> {
+  //   return this.cachedPaginated(
+  //     '/players/topcards',
+  //     query,
+  //     apiFootballCacheConfig.topScorers,
+  //   );
+  // }
+
+  getTeamStatistics(query: QueryParams): Promise<ApiFootballResponse> {
+    return this.cached(
+      '/teams/statistics',
       query,
-      apiFootballCacheConfig.topScorers,
+      apiFootballCacheConfig.standings,
     );
   }
 

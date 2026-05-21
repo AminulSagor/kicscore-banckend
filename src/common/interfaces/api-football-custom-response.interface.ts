@@ -377,3 +377,117 @@ export interface StandingResponseItem {
     standings?: StandingRow[][];
   };
 }
+
+export interface ApiFootballArrayResponse<T> {
+  response?: T[];
+  results?: number;
+  paging?: {
+    current?: number;
+    total?: number;
+  };
+}
+
+export interface ApiFootballObjectResponse<T> {
+  response?: T;
+  results?: number;
+}
+
+export interface LeagueTeamItem {
+  team?: {
+    id?: number;
+    name?: string;
+    logo?: string;
+  };
+}
+
+export interface TeamStatisticsItem {
+  team?: {
+    id?: number;
+    name?: string;
+    logo?: string;
+  };
+  fixtures?: {
+    played?: {
+      total?: number | null;
+    };
+    wins?: {
+      total?: number | null;
+    };
+    draws?: {
+      total?: number | null;
+    };
+    loses?: {
+      total?: number | null;
+    };
+  };
+  goals?: {
+    for?: {
+      total?: {
+        total?: number | null;
+      };
+      average?: {
+        total?: string | null;
+      };
+    };
+    against?: {
+      total?: {
+        total?: number | null;
+      };
+      average?: {
+        total?: string | null;
+      };
+    };
+  };
+  clean_sheet?: {
+    total?: number | null;
+  };
+  failed_to_score?: {
+    total?: number | null;
+  };
+  penalty?: {
+    scored?: {
+      total?: number | null;
+    };
+    missed?: {
+      total?: number | null;
+    };
+  };
+}
+
+export interface TeamAggregatedPlayerStats {
+  team: {
+    id: number | null;
+    name: string | null;
+    logo: string | null;
+  };
+  metrics: {
+    shotAttempts: number;
+    shotsOnTarget: number;
+    penaltyScored: number;
+    penaltyMissed: number;
+    keyPasses: number;
+    tackles: number;
+    interceptions: number;
+    blocks: number;
+    saves: number;
+    goalsConceded: number;
+    yellowCards: number;
+    redCards: number;
+    foulsCommitted: number;
+    foulsDrawn: number;
+  };
+}
+
+export interface TeamStatsSection {
+  key: string;
+  title: string;
+  items: Array<{
+    rank: number;
+    value: number;
+    team: {
+      id: number | null;
+      name: string | null;
+      logo: string | null;
+    };
+  }>;
+}
