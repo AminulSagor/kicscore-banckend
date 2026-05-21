@@ -319,3 +319,47 @@ export interface PlayerMatchEvent {
   minute: string | null;
   role: 'PLAYER' | 'ASSIST';
 }
+
+export interface TeamLeagueItem {
+  league: {
+    id: number;
+    name: string;
+    type: 'League' | 'Cup';
+    logo: string;
+  };
+  country: {
+    name: string;
+    code: string | null;
+    flag: string | null;
+  };
+  seasons: Array<{
+    year: number;
+    coverage?: {
+      standings?: boolean;
+      fixtures?: {
+        events?: boolean;
+      };
+    };
+  }>;
+}
+
+export interface TeamTrophyPreviewGroupInput {
+  league: {
+    id: number;
+    name: string;
+    type: string;
+    logo: string | null;
+    country: string;
+    flag: string | null;
+  };
+  winnerSeasons: number[];
+  runnerUpSeasons: number[];
+}
+
+export interface StandingResponseItem {
+  league?: {
+    id?: number;
+    name?: string;
+    standings?: StandingRow[][];
+  };
+}
