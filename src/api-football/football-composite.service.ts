@@ -12,12 +12,23 @@ import {
   PlayerRecentMatchItem,
   PlayerStatsItem,
   StandingLeagueBlock,
+  StandingResponseItem,
   StandingRow,
+  TeamLeagueItem,
   TeamProfileItem,
+  TeamTrophyPreviewGroupInput,
 } from 'src/common/interfaces/api-football-custom-response.interface';
 import { FollowContext } from 'src/modules/follows/types/follow-context.type';
 import { TOP_LEAGUE_IDS_PARAM } from 'src/common/constants/top-league-ids.constant';
 import { FootballLeaguesByIdsQueryDto } from './dto/football-leagues-by-ids-query.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { TeamTrophyPreviewGroup } from './entities/team-trophy-preview-group.entity';
+import { Repository } from 'typeorm';
+import {
+  TeamTrophyHonourType,
+  TeamTrophyPreviewSeason,
+} from './entities/team-trophy-preview-season.entity';
+import { TeamTrophyPreviewTarget } from './entities/team-trophy-preview-target.entity';
 
 type PlayerStatistic = NonNullable<PlayerStatsItem['statistics']>[number];
 
@@ -26,6 +37,8 @@ type FollowMeta = {
   entityType: FollowEntityType;
   entityId: string;
 };
+
+type TeamHonourType = 'WINNER' | 'RUNNER_UP';
 
 type LeagueProfileItem = {
   league?: {
@@ -45,6 +58,15 @@ export class FootballCompositeService {
   constructor(
     private readonly footballService: FootballService,
     private readonly followsService: FollowsService,
+
+    @InjectRepository(TeamTrophyPreviewTarget)
+    private readonly teamTrophyTargetRepository: Repository<TeamTrophyPreviewTarget>,
+
+    @InjectRepository(TeamTrophyPreviewGroup)
+    private readonly teamTrophyGroupRepository: Repository<TeamTrophyPreviewGroup>,
+
+    @InjectRepository(TeamTrophyPreviewSeason)
+    private readonly teamTrophySeasonRepository: Repository<TeamTrophyPreviewSeason>,
   ) {}
 
   async withFollowMeta<T extends object>(
@@ -1002,29 +1024,520 @@ export class FootballCompositeService {
     teamId: string,
     query: FootballCompositeQueryDto,
   ) {
-    const fromSeason = Number(query.fromSeason ?? 2020);
-    const toSeason = Number(query.toSeason ?? new Date().getFullYear());
+    const target = await this.ensureTeamTrophyTarget(teamId);
+    const existingCount = await this.teamTrophyGroupRepository.count({
+      where: { teamId },
+    });
 
-    const seasons = Array.from(
-      { length: toSeason - fromSeason + 1 },
-      (_, index) => fromSeason + index,
-    );
+    if (!target.initialSyncCompleted || existingCount === 0) {
+      await this.syncTeamTrophyPreviewTarget(teamId, {
+        forceInitial: true,
+      });
+    }
 
-    const results = await Promise.all(
-      seasons.map(async (season) => {
-        const leagues = await this.footballService.getLeagues({
-          team: teamId,
-          season,
-        });
+    return this.getTeamTrophyPreviewFromDb(teamId, query);
+  }
+
+  private async getTeamTrophyPreviewFromDb(
+    teamId: string,
+    query: FootballCompositeQueryDto,
+  ) {
+    const page = this.toPositiveNumber(query.page, 1);
+    const limit = this.toPositiveNumber(query.limit, 20);
+
+    const [groups, total] = await this.teamTrophyGroupRepository.findAndCount({
+      where: {
+        teamId,
+      },
+      relations: {
+        seasons: true,
+      },
+      order: {
+        leagueName: 'ASC',
+      },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    const target = await this.teamTrophyTargetRepository.findOne({
+      where: {
+        teamId,
+      },
+    });
+
+    return {
+      teamId,
+      syncStatus: {
+        initialSyncCompleted: target?.initialSyncCompleted ?? false,
+        syncInProgress: target?.syncInProgress ?? false,
+        syncStartedAt: target?.syncStartedAt ?? null,
+        lastSyncedFromSeason: target?.lastSyncedFromSeason ?? null,
+        lastSyncedToSeason: target?.lastSyncedToSeason ?? null,
+        lastSyncedAt: target?.lastSyncedAt ?? null,
+        lastError: target?.lastError ?? null,
+      },
+      items: groups.map((group) => {
+        const winnerSeasons = group.seasons
+          .filter((season) => season.honourType === TeamTrophyHonourType.WINNER)
+          .map((season) => String(season.season))
+          .sort();
+
+        const runnerUpSeasons = group.seasons
+          .filter(
+            (season) => season.honourType === TeamTrophyHonourType.RUNNER_UP,
+          )
+          .map((season) => String(season.season))
+          .sort();
 
         return {
-          season,
-          leagues,
+          league: {
+            id: group.leagueId,
+            name: group.leagueName,
+            type: group.leagueType,
+            logo: group.leagueLogo,
+            country: group.country,
+            flag: group.flag,
+          },
+          winner: {
+            count: group.winnerCount,
+            seasons: winnerSeasons,
+          },
+          runnerUp: {
+            count: group.runnerUpCount,
+            seasons: runnerUpSeasons,
+          },
+          lastSyncedAt: group.lastSyncedAt,
         };
       }),
-    );
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
 
-    return this.paginateArray(results, query.page, query.limit);
+  private async ensureTeamTrophyTarget(
+    teamId: string,
+  ): Promise<TeamTrophyPreviewTarget> {
+    const existingTarget = await this.teamTrophyTargetRepository.findOne({
+      where: {
+        teamId,
+      },
+    });
+
+    if (existingTarget) {
+      return existingTarget;
+    }
+
+    return this.teamTrophyTargetRepository.save(
+      this.teamTrophyTargetRepository.create({
+        teamId,
+        initialSyncCompleted: false,
+        syncInProgress: false,
+        syncStartedAt: null,
+        lastSyncedFromSeason: null,
+        lastSyncedToSeason: null,
+        lastSyncedAt: null,
+        lastError: null,
+      }),
+    );
+  }
+
+  async syncTeamTrophyPreviewTarget(
+    teamId: string,
+    options?: {
+      forceInitial?: boolean;
+    },
+  ): Promise<{
+    teamId: string;
+    fromSeason: number;
+    toSeason: number;
+    groupsSynced: number;
+  }> {
+    const target = await this.ensureTeamTrophyTarget(teamId);
+
+    if (target.syncInProgress && !this.canRestartTrophySync(target)) {
+      return {
+        teamId,
+        fromSeason: target.lastSyncedFromSeason ?? 0,
+        toSeason: target.lastSyncedToSeason ?? 0,
+        groupsSynced: 0,
+      };
+    }
+
+    target.syncInProgress = true;
+    target.syncStartedAt = new Date();
+    target.lastError = null;
+
+    await this.teamTrophyTargetRepository.save(target);
+
+    const currentYear = new Date().getFullYear();
+
+    const fromSeason =
+      !target.initialSyncCompleted || options?.forceInitial
+        ? this.getInitialTrophyFromSeason()
+        : Math.max(2000, currentYear - this.getRecentTrophyYears());
+
+    const toSeason = currentYear;
+
+    const honoursMap = new Map<string, TeamTrophyPreviewGroupInput>();
+
+    try {
+      for (let season = fromSeason; season <= toSeason; season += 1) {
+        const leaguesResponse = (await this.footballService.getLeagues({
+          team: teamId,
+          season,
+        })) as ApiFootballWrapped<TeamLeagueItem>;
+
+        const leagues = leaguesResponse.response ?? [];
+
+        for (const leagueItem of leagues) {
+          const honourType =
+            leagueItem.league?.type === 'Cup'
+              ? await this.resolveCupHonour(teamId, leagueItem, season)
+              : await this.resolveLeagueHonour(teamId, leagueItem, season);
+
+          if (!honourType) {
+            continue;
+          }
+
+          this.addTeamHonourToInputMap({
+            honoursMap,
+            leagueItem,
+            season,
+            honourType,
+          });
+        }
+      }
+
+      await this.saveTeamTrophyPreviewGroups(teamId, honoursMap);
+
+      target.initialSyncCompleted = true;
+      target.syncInProgress = false;
+      target.syncStartedAt = null;
+      target.lastSyncedFromSeason = fromSeason;
+      target.lastSyncedToSeason = toSeason;
+      target.lastSyncedAt = new Date();
+      target.lastError = null;
+
+      await this.teamTrophyTargetRepository.save(target);
+
+      return {
+        teamId,
+        fromSeason,
+        toSeason,
+        groupsSynced: honoursMap.size,
+      };
+    } catch (error) {
+      target.syncInProgress = false;
+      target.syncStartedAt = null;
+      target.lastError = error instanceof Error ? error.message : String(error);
+      target.lastSyncedAt = new Date();
+
+      await this.teamTrophyTargetRepository.save(target);
+
+      throw error;
+    }
+  }
+
+  private canRestartTrophySync(target: TeamTrophyPreviewTarget): boolean {
+    if (!target.syncStartedAt) {
+      return true;
+    }
+
+    const maxSyncAgeMs = 60 * 60 * 1000;
+    const syncAgeMs = Date.now() - target.syncStartedAt.getTime();
+
+    return syncAgeMs > maxSyncAgeMs;
+  }
+
+  private getInitialTrophyFromSeason(): number {
+    const rawValue = process.env.TEAM_TROPHY_PREVIEW_FROM_SEASON;
+    const parsedValue = Number(rawValue ?? 2000);
+
+    if (Number.isNaN(parsedValue) || parsedValue < 1950) {
+      return 2000;
+    }
+
+    return parsedValue;
+  }
+
+  private getRecentTrophyYears(): number {
+    const rawValue = process.env.TEAM_TROPHY_PREVIEW_RECENT_YEARS;
+    const parsedValue = Number(rawValue ?? 2);
+
+    if (Number.isNaN(parsedValue) || parsedValue < 1) {
+      return 2;
+    }
+
+    return parsedValue;
+  }
+
+  async refreshTeamTrophiesPreview(params: {
+    teamId: string;
+    fromSeason: number;
+    toSeason: number;
+  }): Promise<{
+    teamId: string;
+    fromSeason: number;
+    toSeason: number;
+    groupsSynced: number;
+  }> {
+    const honoursMap = new Map<string, TeamTrophyPreviewGroupInput>();
+
+    for (
+      let season = params.fromSeason;
+      season <= params.toSeason;
+      season += 1
+    ) {
+      const leaguesResponse = (await this.footballService.getLeagues({
+        team: params.teamId,
+        season,
+      })) as ApiFootballWrapped<TeamLeagueItem>;
+
+      const leagues = leaguesResponse.response ?? [];
+
+      for (const leagueItem of leagues) {
+        const honourType =
+          leagueItem.league?.type === 'Cup'
+            ? await this.resolveCupHonour(params.teamId, leagueItem, season)
+            : await this.resolveLeagueHonour(params.teamId, leagueItem, season);
+
+        if (!honourType) {
+          continue;
+        }
+
+        this.addTeamHonourToInputMap({
+          honoursMap,
+          leagueItem,
+          season,
+          honourType,
+        });
+      }
+    }
+
+    await this.saveTeamTrophyPreviewGroups(params.teamId, honoursMap);
+
+    return {
+      teamId: params.teamId,
+      fromSeason: params.fromSeason,
+      toSeason: params.toSeason,
+      groupsSynced: honoursMap.size,
+    };
+  }
+
+  private addTeamHonourToInputMap(params: {
+    honoursMap: Map<string, TeamTrophyPreviewGroupInput>;
+    leagueItem: TeamLeagueItem;
+    season: number;
+    honourType: TeamHonourType;
+  }): void {
+    const key = String(params.leagueItem.league.id);
+
+    const existing = params.honoursMap.get(key) ?? {
+      league: {
+        id: params.leagueItem.league.id,
+        name: params.leagueItem.league.name,
+        type: params.leagueItem.league.type,
+        logo: params.leagueItem.league.logo ?? null,
+        country: params.leagueItem.country.name,
+        flag: params.leagueItem.country.flag ?? null,
+      },
+      winnerSeasons: [],
+      runnerUpSeasons: [],
+    };
+
+    if (params.honourType === 'WINNER') {
+      existing.winnerSeasons.push(params.season);
+    }
+
+    if (params.honourType === 'RUNNER_UP') {
+      existing.runnerUpSeasons.push(params.season);
+    }
+
+    params.honoursMap.set(key, existing);
+  }
+
+  private async saveTeamTrophyPreviewGroups(
+    teamId: string,
+    honoursMap: Map<string, TeamTrophyPreviewGroupInput>,
+  ): Promise<void> {
+    for (const item of honoursMap.values()) {
+      let group = await this.teamTrophyGroupRepository.findOne({
+        where: {
+          teamId,
+          leagueId: item.league.id,
+        },
+      });
+
+      if (!group) {
+        group = this.teamTrophyGroupRepository.create({
+          teamId,
+          leagueId: item.league.id,
+          leagueName: item.league.name,
+          leagueType: item.league.type,
+          leagueLogo: item.league.logo,
+          country: item.league.country,
+          flag: item.league.flag,
+          winnerCount: item.winnerSeasons.length,
+          runnerUpCount: item.runnerUpSeasons.length,
+          lastSyncedAt: new Date(),
+        });
+      } else {
+        group.leagueName = item.league.name;
+        group.leagueType = item.league.type;
+        group.leagueLogo = item.league.logo;
+        group.country = item.league.country;
+        group.flag = item.league.flag;
+        group.winnerCount = item.winnerSeasons.length;
+        group.runnerUpCount = item.runnerUpSeasons.length;
+        group.lastSyncedAt = new Date();
+      }
+
+      const savedGroup = await this.teamTrophyGroupRepository.save(group);
+
+      await this.teamTrophySeasonRepository.delete({
+        groupId: savedGroup.id,
+      });
+
+      const seasons = [
+        ...item.winnerSeasons.map((season) =>
+          this.teamTrophySeasonRepository.create({
+            groupId: savedGroup.id,
+            honourType: TeamTrophyHonourType.WINNER,
+            season,
+          }),
+        ),
+        ...item.runnerUpSeasons.map((season) =>
+          this.teamTrophySeasonRepository.create({
+            groupId: savedGroup.id,
+            honourType: TeamTrophyHonourType.RUNNER_UP,
+            season,
+          }),
+        ),
+      ];
+
+      if (seasons.length > 0) {
+        await this.teamTrophySeasonRepository.save(seasons);
+      }
+    }
+  }
+
+  private async resolveLeagueHonour(
+    teamId: string,
+    leagueItem: TeamLeagueItem,
+    season: number,
+  ): Promise<TeamHonourType | null> {
+    const hasStandings = leagueItem.seasons?.some((seasonItem) => {
+      return seasonItem.year === season && seasonItem.coverage?.standings;
+    });
+
+    if (!hasStandings) {
+      return null;
+    }
+
+    const standingsResponse = (await this.footballService.getStandings({
+      league: String(leagueItem.league.id),
+      season,
+    })) as ApiFootballWrapped<StandingResponseItem>;
+
+    const rows =
+      standingsResponse.response?.[0]?.league?.standings?.flat() ?? [];
+
+    const teamRow = rows.find((row) => {
+      return String(row.team?.id) === teamId;
+    });
+
+    if (!teamRow?.rank) {
+      return null;
+    }
+
+    if (teamRow.rank === 1) {
+      return 'WINNER';
+    }
+
+    if (teamRow.rank === 2) {
+      return 'RUNNER_UP';
+    }
+
+    return null;
+  }
+
+  private async resolveCupHonour(
+    teamId: string,
+    leagueItem: TeamLeagueItem,
+    season: number,
+  ): Promise<TeamHonourType | null> {
+    const fixturesResponse = (await this.footballService.getFixtures({
+      league: String(leagueItem.league.id),
+      season,
+    })) as ApiFootballWrapped<FixtureItem>;
+
+    const fixtures = fixturesResponse.response ?? [];
+
+    const finalFixtures = fixtures
+      .filter((fixture) => {
+        const round = fixture.league?.round ?? '';
+        const status = fixture.fixture?.status?.short ?? '';
+
+        const homeTeamId = String(fixture.teams?.home?.id ?? '');
+        const awayTeamId = String(fixture.teams?.away?.id ?? '');
+
+        const teamPlayed = homeTeamId === teamId || awayTeamId === teamId;
+        const isFinished = ['FT', 'AET', 'PEN'].includes(status);
+
+        return this.isCupFinalRound(round) && teamPlayed && isFinished;
+      })
+      .sort((left, right) => {
+        return this.getFixtureTimestamp(right) - this.getFixtureTimestamp(left);
+      });
+
+    const finalFixture = finalFixtures[0];
+
+    if (!finalFixture) {
+      return null;
+    }
+
+    const homeTeamId = String(finalFixture.teams?.home?.id ?? '');
+    const awayTeamId = String(finalFixture.teams?.away?.id ?? '');
+
+    if (homeTeamId === teamId) {
+      return finalFixture.teams?.home?.winner ? 'WINNER' : 'RUNNER_UP';
+    }
+
+    if (awayTeamId === teamId) {
+      return finalFixture.teams?.away?.winner ? 'WINNER' : 'RUNNER_UP';
+    }
+
+    return null;
+  }
+
+  private isCupFinalRound(round: string): boolean {
+    const normalizedRound = round.toLowerCase();
+
+    if (normalizedRound.includes('semi')) {
+      return false;
+    }
+
+    if (normalizedRound.includes('quarter')) {
+      return false;
+    }
+
+    if (normalizedRound.includes('round of')) {
+      return false;
+    }
+
+    if (normalizedRound.includes('3rd place')) {
+      return false;
+    }
+
+    if (normalizedRound.includes('third place')) {
+      return false;
+    }
+
+    return normalizedRound.includes('final');
   }
 
   async getPlayerRecentMatches(
