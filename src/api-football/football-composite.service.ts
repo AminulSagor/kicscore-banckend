@@ -5,7 +5,11 @@ import { FollowsService } from 'src/modules/follows/follows.service';
 import { FootballCompositeQueryDto } from './dto/football-composite-query.dto';
 import { FootballService } from './football.service';
 import {
+  FixtureEventsResponse,
   FixtureItem,
+  FixturePlayersResponse,
+  PlayerMatchEvent,
+  PlayerRecentMatchItem,
   PlayerStatsItem,
   StandingLeagueBlock,
   StandingRow,
@@ -1028,31 +1032,317 @@ export class FootballCompositeService {
     query: FootballCompositeQueryDto,
     followContext?: FollowContext,
   ) {
-    if (!query.team) {
+    if (!query.season) {
       return this.withFollowMeta(
         {
           playerId,
           items: [],
-          message: 'team is required to fetch recent player matches',
+          meta: {
+            page: this.toPositiveNumber(query.page, 1),
+            limit: this.toPositiveNumber(query.limit, 10),
+            total: 0,
+            totalPages: 0,
+          },
+          message: 'season is required to fetch recent player matches',
         },
         followContext,
       );
     }
 
-    const fixtures = await this.footballService.getTeamFixtures(query.team, {
-      last: query.last ?? '10',
-      page: query.page,
-      limit: query.limit,
-    });
+    const playerData = (await this.footballService.getPlayers({
+      id: playerId,
+      season: query.season,
+    })) as ApiFootballWrapped<PlayerStatsItem>;
+
+    const teamIds = this.getPlayerContextTeamIds(playerData, query.team);
+
+    if (!teamIds.length) {
+      return this.withFollowMeta(
+        {
+          playerId,
+          season: query.season,
+          items: [],
+          meta: {
+            page: this.toPositiveNumber(query.page, 1),
+            limit: this.toPositiveNumber(query.limit, 10),
+            total: 0,
+            totalPages: 0,
+          },
+          message: 'No team context found for this player and season',
+        },
+        followContext,
+      );
+    }
+
+    const last = query.last ?? '10';
+    const fixtureMap = new Map<string, FixtureItem>();
+
+    for (const teamId of teamIds) {
+      const fixturesResponse = (await this.footballService.getTeamFixtures(
+        teamId,
+        {
+          last,
+        },
+      )) as ApiFootballWrapped<FixtureItem>;
+
+      for (const fixture of fixturesResponse.response ?? []) {
+        const fixtureId = fixture.fixture?.id;
+
+        if (fixtureId) {
+          fixtureMap.set(String(fixtureId), fixture);
+        }
+      }
+    }
+
+    const candidateFixtures = Array.from(fixtureMap.values()).sort(
+      (left, right) => {
+        return this.getFixtureTimestamp(right) - this.getFixtureTimestamp(left);
+      },
+    );
+
+    const appearedMatches: PlayerRecentMatchItem[] = [];
+
+    for (const fixture of candidateFixtures) {
+      const fixtureId = fixture.fixture?.id;
+
+      if (!fixtureId) {
+        continue;
+      }
+
+      const [fixturePlayersData, fixtureEventsData] = await Promise.all([
+        this.footballService.getFixturePlayers(String(fixtureId)),
+        this.footballService.getFixtureEvents(String(fixtureId)),
+      ]);
+
+      const playerMatchStats = this.extractPlayerMatchStats({
+        playerId,
+        fixturePlayersData,
+      });
+
+      if (!playerMatchStats) {
+        continue;
+      }
+
+      const eventSummary = this.extractPlayerMatchEvents({
+        playerId,
+        fixtureEventsData,
+      });
+
+      appearedMatches.push({
+        fixtureId: String(fixtureId),
+        fixture,
+        player: {
+          minutes: playerMatchStats.minutes,
+          rating: playerMatchStats.rating,
+          goals: playerMatchStats.goals,
+          assists: playerMatchStats.assists,
+          yellowCards: playerMatchStats.yellowCards,
+          redCards: playerMatchStats.redCards,
+          substitute: playerMatchStats.substitute,
+          position: playerMatchStats.position,
+          number: playerMatchStats.number,
+          events: eventSummary.events,
+          eventChips: eventSummary.eventChips,
+        },
+      });
+    }
+
+    const page = this.toPositiveNumber(query.page, 1);
+    const limit = this.toPositiveNumber(query.limit, 10);
+    const total = appearedMatches.length;
+    const startIndex = (page - 1) * limit;
 
     return this.withFollowMeta(
       {
         playerId,
-        teamId: query.team,
-        fixtures,
+        season: query.season,
+        teamIds,
+        items: appearedMatches.slice(startIndex, startIndex + limit),
+        meta: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
       },
       followContext,
     );
+  }
+
+  private getFixtureTimestamp(fixture: FixtureItem): number {
+    if (typeof fixture.fixture?.timestamp === 'number') {
+      return fixture.fixture.timestamp;
+    }
+
+    if (!fixture.fixture?.date) {
+      return 0;
+    }
+
+    const timestamp = new Date(fixture.fixture.date).getTime();
+
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  }
+
+  private getPlayerContextTeamIds(
+    playerData: ApiFootballWrapped<PlayerStatsItem>,
+    requestedTeamId?: string,
+  ): string[] {
+    const teamIds = new Set<string>();
+
+    if (requestedTeamId) {
+      teamIds.add(requestedTeamId);
+    }
+
+    for (const playerItem of playerData.response ?? []) {
+      for (const statistic of playerItem.statistics ?? []) {
+        const teamId = statistic.team?.id;
+
+        if (teamId) {
+          teamIds.add(String(teamId));
+        }
+      }
+    }
+
+    return Array.from(teamIds);
+  }
+
+  private extractPlayerMatchStats(params: {
+    playerId: string;
+    fixturePlayersData: unknown;
+  }): {
+    minutes: number | null;
+    rating: string | null;
+    goals: number;
+    assists: number;
+    yellowCards: number;
+    redCards: number;
+    substitute: boolean | null;
+    position: string | null;
+    number: number | null;
+  } | null {
+    const fixturePlayers = params.fixturePlayersData as FixturePlayersResponse;
+
+    for (const team of fixturePlayers.response ?? []) {
+      for (const playerItem of team.players ?? []) {
+        if (String(playerItem.player?.id) !== params.playerId) {
+          continue;
+        }
+
+        const statistics = playerItem.statistics?.[0];
+
+        if (!statistics) {
+          return null;
+        }
+
+        return {
+          minutes: statistics.games?.minutes ?? null,
+          rating: statistics.games?.rating ?? null,
+          goals: statistics.goals?.total ?? 0,
+          assists: statistics.goals?.assists ?? 0,
+          yellowCards: statistics.cards?.yellow ?? 0,
+          redCards: statistics.cards?.red ?? 0,
+          substitute: statistics.games?.substitute ?? null,
+          position: statistics.games?.position ?? null,
+          number: statistics.games?.number ?? null,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private extractPlayerMatchEvents(params: {
+    playerId: string;
+    fixtureEventsData: unknown;
+  }): {
+    events: Array<{
+      type: string;
+      detail: string;
+      minute: string | null;
+      role: 'PLAYER' | 'ASSIST';
+    }>;
+    eventChips: string[];
+  } {
+    const fixtureEvents = params.fixtureEventsData as FixtureEventsResponse;
+    const events: PlayerMatchEvent[] = [];
+    const eventChips: string[] = [];
+
+    for (const event of fixtureEvents.response ?? []) {
+      const playerId = event.player?.id ? String(event.player.id) : null;
+      const assistId = event.assist?.id ? String(event.assist.id) : null;
+      const minute = this.formatEventMinute(
+        event.time?.elapsed ?? null,
+        event.time?.extra ?? null,
+      );
+
+      if (playerId === params.playerId) {
+        const detail = event.detail ?? event.type ?? 'Event';
+        const type = event.type ?? 'Event';
+
+        events.push({
+          type,
+          detail,
+          minute,
+          role: 'PLAYER' as const,
+        });
+
+        eventChips.push(this.buildPlayerEventChip(type, detail, minute));
+      }
+
+      if (assistId === params.playerId) {
+        const type = event.type ?? 'Event';
+        const detail = 'Assist';
+
+        events.push({
+          type,
+          detail,
+          minute,
+          role: 'ASSIST' as const,
+        });
+
+        eventChips.push(`Assist${minute ? ` ${minute}` : ''}`);
+      }
+    }
+
+    return {
+      events,
+      eventChips: Array.from(new Set(eventChips)),
+    };
+  }
+
+  private buildPlayerEventChip(
+    type: string,
+    detail: string,
+    minute: string | null,
+  ): string {
+    if (type === 'Goal') {
+      return `Goal${minute ? ` ${minute}` : ''}`;
+    }
+
+    if (type === 'Card') {
+      return `${detail}${minute ? ` ${minute}` : ''}`;
+    }
+
+    if (type === 'subst') {
+      return `Substitution${minute ? ` ${minute}` : ''}`;
+    }
+
+    return `${detail}${minute ? ` ${minute}` : ''}`;
+  }
+
+  private formatEventMinute(
+    elapsed: number | null,
+    extra: number | null,
+  ): string | null {
+    if (elapsed === null) {
+      return null;
+    }
+
+    if (extra !== null && extra > 0) {
+      return `${elapsed}+${extra}'`;
+    }
+
+    return `${elapsed}'`;
   }
 
   async getPlayerCareerTotals(

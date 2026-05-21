@@ -121,6 +121,7 @@ export interface FixtureItem {
   fixture?: {
     id?: number;
     date?: string;
+    timestamp?: number;
     venue?: {
       name?: string | null;
       city?: string | null;
@@ -230,4 +231,91 @@ export interface PlayerStatsItem {
       red?: number | null;
     };
   }>;
+}
+
+export interface FixturePlayersResponse {
+  response?: FixturePlayerTeam[];
+}
+
+export interface FixturePlayerTeam {
+  team?: {
+    id?: number;
+    name?: string;
+  };
+  players?: FixturePlayerItem[];
+}
+
+export interface FixturePlayerItem {
+  player?: {
+    id?: number;
+    name?: string;
+  };
+  statistics?: Array<{
+    games?: {
+      minutes?: number | null;
+      number?: number | null;
+      position?: string | null;
+      rating?: string | null;
+      substitute?: boolean | null;
+    };
+    goals?: {
+      total?: number | null;
+      assists?: number | null;
+    };
+    cards?: {
+      yellow?: number | null;
+      red?: number | null;
+    };
+  }>;
+}
+
+export interface FixtureEventsResponse {
+  response?: FixtureEventItem[];
+}
+
+export interface FixtureEventItem {
+  time?: {
+    elapsed?: number | null;
+    extra?: number | null;
+  };
+  team?: {
+    id?: number | null;
+    name?: string | null;
+  };
+  player?: {
+    id?: number | null;
+    name?: string | null;
+  };
+  assist?: {
+    id?: number | null;
+    name?: string | null;
+  };
+  type?: string;
+  detail?: string;
+  comments?: string | null;
+}
+
+export interface PlayerRecentMatchItem {
+  fixtureId: string;
+  fixture: FixtureItem;
+  player: {
+    minutes: number | null;
+    rating: string | null;
+    goals: number;
+    assists: number;
+    yellowCards: number;
+    redCards: number;
+    substitute: boolean | null;
+    position: string | null;
+    number: number | null;
+    events: PlayerMatchEvent[];
+    eventChips: string[];
+  };
+}
+
+export interface PlayerMatchEvent {
+  type: string;
+  detail: string;
+  minute: string | null;
+  role: 'PLAYER' | 'ASSIST';
 }
