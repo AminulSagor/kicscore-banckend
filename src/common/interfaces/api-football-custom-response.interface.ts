@@ -186,11 +186,13 @@ export interface PlayerStatsItem {
     age?: number;
     nationality?: string;
     position?: string;
+    photo?: string;
   };
   statistics?: Array<{
     team?: {
       id?: number;
       name?: string;
+      logo?: string;
     };
     league?: {
       id?: number;
@@ -203,7 +205,9 @@ export interface PlayerStatsItem {
     };
     goals?: {
       total?: number | null;
+      conceded?: number | null;
       assists?: number | null;
+      saves?: number | null;
     };
     shots?: {
       total?: number | null;
@@ -216,6 +220,7 @@ export interface PlayerStatsItem {
     };
     tackles?: {
       total?: number | null;
+      blocks?: number | null;
       interceptions?: number | null;
     };
     duels?: {
@@ -226,9 +231,18 @@ export interface PlayerStatsItem {
       attempts?: number | null;
       success?: number | null;
     };
+    fouls?: {
+      drawn?: number | null;
+      committed?: number | null;
+    };
     cards?: {
       yellow?: number | null;
       red?: number | null;
+    };
+    penalty?: {
+      scored?: number | null;
+      missed?: number | null;
+      saved?: number | null;
     };
   }>;
 }

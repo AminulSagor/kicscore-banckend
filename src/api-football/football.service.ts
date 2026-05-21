@@ -288,6 +288,22 @@ export class FootballService {
     );
   }
 
+  getTopCards(query: QueryParams): Promise<ApiFootballResponse> {
+    return this.cachedPaginated(
+      '/players/topcards',
+      query,
+      apiFootballCacheConfig.topScorers,
+    );
+  }
+
+  getPlayersApiPage(query: QueryParams): Promise<ApiFootballResponse> {
+    return this.cached(
+      '/players',
+      query,
+      apiFootballCacheConfig.fixturesFuture,
+    );
+  }
+
   getTransfers(query: QueryParams): Promise<ApiFootballResponse> {
     return this.cachedPaginated(
       '/transfers',

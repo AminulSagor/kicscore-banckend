@@ -21,6 +21,7 @@ import { FootballCompositeService } from './football-composite.service';
 import { FootballCompositeQueryDto } from './dto/football-composite-query.dto';
 import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.enum';
 import { FootballLeaguesByIdsQueryDto } from './dto/football-leagues-by-ids-query.dto';
+import { LeaguePlayerStatsQueryDto } from './dto/league-player-stats-query.dto';
 
 @Public()
 @Controller('football')
@@ -264,6 +265,22 @@ export class FootballController {
   @Get('players/top-assists')
   getTopAssists(@Query() query: FootballQueryDto) {
     return this.footballService.getTopAssists(query);
+  }
+
+  @Get('players/top-cards')
+  getTopCards(@Query() query: FootballQueryDto) {
+    return this.footballService.getTopCards(query);
+  }
+
+  @Get('leagues/:leagueId/player-stats')
+  getLeaguePlayerStats(
+    @Param('leagueId', ParseIntPipe) leagueId: number,
+    @Query() query: LeaguePlayerStatsQueryDto,
+  ) {
+    return this.footballCompositeService.getLeaguePlayerStats(
+      String(leagueId),
+      query,
+    );
   }
 
   @Get('players/profiles')
