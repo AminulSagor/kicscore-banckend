@@ -5,17 +5,23 @@ import { FollowsService } from 'src/modules/follows/follows.service';
 import { FootballCompositeQueryDto } from './dto/football-composite-query.dto';
 import { FootballService } from './football.service';
 import {
+  ApiFootballArrayResponse,
+  ApiFootballObjectResponse,
   FixtureEventsResponse,
   FixtureItem,
   FixturePlayersResponse,
+  LeagueTeamItem,
   PlayerMatchEvent,
   PlayerRecentMatchItem,
   PlayerStatsItem,
   StandingLeagueBlock,
   StandingResponseItem,
   StandingRow,
+  TeamAggregatedPlayerStats,
   TeamLeagueItem,
   TeamProfileItem,
+  TeamStatisticsItem,
+  TeamStatsSection,
   TeamTrophyPreviewGroupInput,
 } from 'src/common/interfaces/api-football-custom-response.interface';
 import { FollowContext } from 'src/modules/follows/types/follow-context.type';
@@ -33,6 +39,10 @@ import {
   LeaguePlayerStatsCategory,
   LeaguePlayerStatsQueryDto,
 } from './dto/league-player-stats-query.dto';
+import {
+  LeagueTeamStatsCategory,
+  LeagueTeamStatsQueryDto,
+} from './dto/league-team-stats-query.dto';
 
 type PlayerStatistic = NonNullable<PlayerStatsItem['statistics']>[number];
 
@@ -2370,5 +2380,435 @@ export class FootballCompositeService {
         getValue: (statistics) => statistics?.fouls?.drawn ?? 0,
       },
     ];
+  }
+
+  async getLeagueTeamStats(
+    leagueId: string,
+    query: LeagueTeamStatsQueryDto,
+  ): Promise<{
+    leagueId: string;
+    season: string;
+    category: LeagueTeamStatsCategory;
+    sections: TeamStatsSection[];
+    meta: {
+      page: number;
+      limit: number;
+    };
+  }> {
+    const page = this.toPositiveNumber(query.page, 1);
+    const limit = this.toPositiveNumber(query.limit, 10);
+
+    if (query.category === LeagueTeamStatsCategory.TOP_STATS) {
+      const sections = await this.getLeagueTopTeamStatsSections({
+        leagueId,
+        season: query.season,
+        page,
+        limit,
+      });
+
+      return {
+        leagueId,
+        season: query.season,
+        category: query.category,
+        sections,
+        meta: {
+          page,
+          limit,
+        },
+      };
+    }
+
+    const players = await this.getAllLeaguePlayersForTeamStats({
+      leagueId,
+      season: query.season,
+    });
+
+    const aggregatedTeamStats = this.aggregatePlayerStatsByTeam(
+      players,
+      leagueId,
+    );
+    const sections = this.buildTeamStatSections({
+      category: query.category,
+      teams: aggregatedTeamStats,
+      page,
+      limit,
+    });
+
+    return {
+      leagueId,
+      season: query.season,
+      category: query.category,
+      sections,
+      meta: {
+        page,
+        limit,
+      },
+    };
+  }
+
+  private async getLeagueTopTeamStatsSections(params: {
+    leagueId: string;
+    season: string;
+    page: number;
+    limit: number;
+  }): Promise<TeamStatsSection[]> {
+    const teamsResponse = (await this.footballService.getTeams({
+      league: params.leagueId,
+      season: params.season,
+    })) as ApiFootballArrayResponse<LeagueTeamItem>;
+
+    const teams = teamsResponse.response ?? [];
+
+    const teamStats: TeamStatisticsItem[] = [];
+
+    for (const item of teams) {
+      const teamId = item.team?.id;
+
+      if (!teamId) {
+        continue;
+      }
+
+      const statsResponse = (await this.footballService.getTeamStatistics({
+        league: params.leagueId,
+        season: params.season,
+        team: String(teamId),
+      })) as ApiFootballObjectResponse<TeamStatisticsItem>;
+
+      if (!statsResponse.response) {
+        continue;
+      }
+
+      teamStats.push(statsResponse.response);
+    }
+
+    return this.buildTopStatsSections({
+      stats: teamStats,
+      page: params.page,
+      limit: params.limit,
+    });
+  }
+
+  private buildTopStatsSections(params: {
+    stats: TeamStatisticsItem[];
+    page: number;
+    limit: number;
+  }): TeamStatsSection[] {
+    const sections = [
+      {
+        key: 'goalsPerMatch',
+        title: 'Goals per Match',
+        sort: 'DESC' as const,
+        getValue: (stats: TeamStatisticsItem) =>
+          this.toNumber(stats.goals?.for?.average?.total),
+      },
+      {
+        key: 'goalsConcededPerMatch',
+        title: 'Goals Conceded per Match',
+        sort: 'ASC' as const,
+        getValue: (stats: TeamStatisticsItem) =>
+          this.toNumber(stats.goals?.against?.average?.total),
+      },
+      {
+        key: 'cleanSheets',
+        title: 'Clean Sheets',
+        sort: 'DESC' as const,
+        getValue: (stats: TeamStatisticsItem) => stats.clean_sheet?.total ?? 0,
+      },
+      {
+        key: 'wins',
+        title: 'Wins',
+        sort: 'DESC' as const,
+        getValue: (stats: TeamStatisticsItem) =>
+          stats.fixtures?.wins?.total ?? 0,
+      },
+      {
+        key: 'failedToScore',
+        title: 'Failed to Score',
+        sort: 'ASC' as const,
+        getValue: (stats: TeamStatisticsItem) =>
+          stats.failed_to_score?.total ?? 0,
+      },
+    ];
+
+    return sections.map((section) => {
+      const ranked = params.stats
+        .map((stats) => ({
+          value: section.getValue(stats),
+          team: {
+            id: stats.team?.id ?? null,
+            name: stats.team?.name ?? null,
+            logo: stats.team?.logo ?? null,
+          },
+        }))
+        .filter((item) => item.value > 0 || section.key === 'failedToScore')
+        .sort((left, right) => {
+          return section.sort === 'ASC'
+            ? left.value - right.value
+            : right.value - left.value;
+        });
+
+      return {
+        key: section.key,
+        title: section.title,
+        items: this.paginateRankedTeams({
+          items: ranked,
+          page: params.page,
+          limit: params.limit,
+        }),
+      };
+    });
+  }
+
+  private async getAllLeaguePlayersForTeamStats(params: {
+    leagueId: string;
+    season: string;
+  }): Promise<PlayerStatsItem[]> {
+    const firstPage = (await this.footballService.getPlayersApiPage({
+      league: params.leagueId,
+      season: params.season,
+      page: '1',
+    })) as ApiFootballArrayResponse<PlayerStatsItem>;
+
+    const totalPages = firstPage.paging?.total ?? 1;
+    const maxPages = this.toPositiveNumber(
+      process.env.LEAGUE_TEAM_STATS_MAX_API_PAGES,
+      totalPages,
+    );
+
+    const pagesToFetch = Math.min(totalPages, maxPages);
+    const players = [...(firstPage.response ?? [])];
+
+    for (let page = 2; page <= pagesToFetch; page += 1) {
+      const response = (await this.footballService.getPlayersApiPage({
+        league: params.leagueId,
+        season: params.season,
+        page: String(page),
+      })) as ApiFootballArrayResponse<PlayerStatsItem>;
+
+      players.push(...(response.response ?? []));
+    }
+
+    return players;
+  }
+
+  private aggregatePlayerStatsByTeam(
+    players: PlayerStatsItem[],
+    leagueId: string,
+  ): TeamAggregatedPlayerStats[] {
+    const teamMap = new Map<string, TeamAggregatedPlayerStats>();
+
+    for (const player of players) {
+      for (const stat of player.statistics ?? []) {
+        if (stat.league?.id && String(stat.league.id) !== leagueId) {
+          continue;
+        }
+
+        const teamId = stat.team?.id;
+
+        if (!teamId) {
+          continue;
+        }
+
+        const key = String(teamId);
+
+        const existing = teamMap.get(key) ?? {
+          team: {
+            id: stat.team?.id ?? null,
+            name: stat.team?.name ?? null,
+            logo: stat.team?.logo ?? null,
+          },
+          metrics: {
+            shotAttempts: 0,
+            shotsOnTarget: 0,
+            penaltyScored: 0,
+            penaltyMissed: 0,
+            keyPasses: 0,
+            tackles: 0,
+            interceptions: 0,
+            blocks: 0,
+            saves: 0,
+            goalsConceded: 0,
+            yellowCards: 0,
+            redCards: 0,
+            foulsCommitted: 0,
+            foulsDrawn: 0,
+          },
+        };
+
+        existing.metrics.shotAttempts += stat.shots?.total ?? 0;
+        existing.metrics.shotsOnTarget += stat.shots?.on ?? 0;
+        existing.metrics.penaltyScored += stat.penalty?.scored ?? 0;
+        existing.metrics.penaltyMissed += stat.penalty?.missed ?? 0;
+        existing.metrics.keyPasses += stat.passes?.key ?? 0;
+
+        existing.metrics.tackles += stat.tackles?.total ?? 0;
+        existing.metrics.interceptions += stat.tackles?.interceptions ?? 0;
+        existing.metrics.blocks += stat.tackles?.blocks ?? 0;
+        existing.metrics.saves += stat.goals?.saves ?? 0;
+        existing.metrics.goalsConceded += stat.goals?.conceded ?? 0;
+
+        existing.metrics.yellowCards += stat.cards?.yellow ?? 0;
+        existing.metrics.redCards += stat.cards?.red ?? 0;
+        existing.metrics.foulsCommitted += stat.fouls?.committed ?? 0;
+        existing.metrics.foulsDrawn += stat.fouls?.drawn ?? 0;
+
+        teamMap.set(key, existing);
+      }
+    }
+
+    return Array.from(teamMap.values());
+  }
+
+  private buildTeamStatSections(params: {
+    category: LeagueTeamStatsCategory;
+    teams: TeamAggregatedPlayerStats[];
+    page: number;
+    limit: number;
+  }): TeamStatsSection[] {
+    const sections = this.getTeamStatSectionDefinitions(params.category);
+
+    return sections.map((section) => {
+      const ranked = params.teams
+        .map((team) => ({
+          value: section.getValue(team),
+          team: team.team,
+        }))
+        .filter((item) => item.value > 0)
+        .sort((left, right) => right.value - left.value);
+
+      return {
+        key: section.key,
+        title: section.title,
+        items: this.paginateRankedTeams({
+          items: ranked,
+          page: params.page,
+          limit: params.limit,
+        }),
+      };
+    });
+  }
+
+  private getTeamStatSectionDefinitions(
+    category: LeagueTeamStatsCategory,
+  ): Array<{
+    key: string;
+    title: string;
+    getValue: (team: TeamAggregatedPlayerStats) => number;
+  }> {
+    if (category === LeagueTeamStatsCategory.ATTACK) {
+      return [
+        {
+          key: 'shotAttempts',
+          title: 'Shot Attempts',
+          getValue: (team) => team.metrics.shotAttempts,
+        },
+        {
+          key: 'shotsOnTarget',
+          title: 'Shots on Target',
+          getValue: (team) => team.metrics.shotsOnTarget,
+        },
+        {
+          key: 'keyPasses',
+          title: 'Key Passes',
+          getValue: (team) => team.metrics.keyPasses,
+        },
+        {
+          key: 'penaltyScored',
+          title: 'Penalty Scored',
+          getValue: (team) => team.metrics.penaltyScored,
+        },
+        {
+          key: 'penaltyMissed',
+          title: 'Penalty Missed',
+          getValue: (team) => team.metrics.penaltyMissed,
+        },
+      ];
+    }
+
+    if (category === LeagueTeamStatsCategory.DEFENSE) {
+      return [
+        {
+          key: 'tackles',
+          title: 'Tackles',
+          getValue: (team) => team.metrics.tackles,
+        },
+        {
+          key: 'interceptions',
+          title: 'Interceptions',
+          getValue: (team) => team.metrics.interceptions,
+        },
+        {
+          key: 'blocks',
+          title: 'Blocks',
+          getValue: (team) => team.metrics.blocks,
+        },
+        {
+          key: 'saves',
+          title: 'Saves',
+          getValue: (team) => team.metrics.saves,
+        },
+        {
+          key: 'goalsConceded',
+          title: 'Goals Conceded',
+          getValue: (team) => team.metrics.goalsConceded,
+        },
+      ];
+    }
+
+    return [
+      {
+        key: 'yellowCards',
+        title: 'Yellow Cards',
+        getValue: (team) => team.metrics.yellowCards,
+      },
+      {
+        key: 'redCards',
+        title: 'Red Cards',
+        getValue: (team) => team.metrics.redCards,
+      },
+      {
+        key: 'foulsCommitted',
+        title: 'Fouls Committed',
+        getValue: (team) => team.metrics.foulsCommitted,
+      },
+      {
+        key: 'foulsDrawn',
+        title: 'Fouls Drawn',
+        getValue: (team) => team.metrics.foulsDrawn,
+      },
+    ];
+  }
+
+  private paginateRankedTeams(params: {
+    items: Array<{
+      value: number;
+      team: {
+        id: number | null;
+        name: string | null;
+        logo: string | null;
+      };
+    }>;
+    page: number;
+    limit: number;
+  }) {
+    const startIndex = (params.page - 1) * params.limit;
+
+    return params.items
+      .slice(startIndex, startIndex + params.limit)
+      .map((item, index) => ({
+        rank: startIndex + index + 1,
+        value: item.value,
+        team: item.team,
+      }));
+  }
+
+  private toNumber(value: string | number | null | undefined): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+
+    const parsed = Number(value);
+
+    return Number.isNaN(parsed) ? 0 : parsed;
   }
 }
