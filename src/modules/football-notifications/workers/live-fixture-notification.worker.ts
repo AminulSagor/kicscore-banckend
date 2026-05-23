@@ -5,7 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { FootballService } from 'src/api-football/football.service';
 import { RedisService } from 'src/redis/redis.service';
@@ -16,6 +16,23 @@ import { FootballNotificationFanoutService } from '../football-notification-fano
 import { FootballFixtureNotificationSnapshot } from '../entities/football-fixture-notification-snapshot.entity';
 import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.enum';
 import { FootballFixtureEventNotificationSnapshot } from '../entities/football-fixture-event-notification-snapshot.entity';
+import { NotificationPreferencesService } from 'src/notifications/notification-preferences.service';
+import { FollowsService } from 'src/modules/follows/follows.service';
+
+const COMPLETED_FIXTURE_STATUSES = new Set(['FT', 'AET', 'PEN']);
+
+const REMOVED_FIXTURE_STATUSES = new Set(['FT', 'AET', 'PEN', 'CANC', 'ABD']);
+
+const RECONCILABLE_LIVE_STATUSES = [
+  '1H',
+  'HT',
+  '2H',
+  'ET',
+  'BT',
+  'P',
+  'INT',
+  'LIVE',
+];
 
 interface ApiFootballLiveFixturesResponse {
   response?: ApiFootballFixture[];
@@ -81,6 +98,8 @@ export class LiveFixtureNotificationWorker
     private readonly redisService: RedisService,
     private readonly notificationsService: NotificationsService,
     private readonly fanoutService: FootballNotificationFanoutService,
+    private readonly notificationPreferencesService: NotificationPreferencesService,
+    private readonly followsService: FollowsService,
 
     @InjectRepository(FootballFixtureNotificationSnapshot)
     private readonly snapshotRepository: Repository<FootballFixtureNotificationSnapshot>,
@@ -140,10 +159,15 @@ export class LiveFixtureNotificationWorker
         (await this.footballService.getLiveFixtures()) as ApiFootballLiveFixturesResponse;
 
       const fixtures = data.response ?? [];
+      const liveFixtureIds = new Set(
+        fixtures.map((fixture) => String(fixture.fixture.id)),
+      );
 
       for (const fixture of fixtures) {
         await this.processFixture(fixture);
       }
+
+      await this.reconcileMissingFollowedFixtures(liveFixtureIds);
     } catch (error) {
       this.logger.error('Live fixture worker failed', error as Error);
     } finally {
@@ -387,6 +411,28 @@ export class LiveFixtureNotificationWorker
     });
 
     if (!snapshot) {
+      if (statusShort === '1H' && elapsed !== null && elapsed <= 2) {
+        await this.sendStatusNotification({
+          fixture,
+          fixtureId,
+          leagueId,
+          statusShort,
+          title: 'Kickoff',
+          body: `${fixture.teams.home.name} vs ${fixture.teams.away.name} has started`,
+          type: NotificationType.MATCH_STARTED,
+        });
+      }
+
+      if (REMOVED_FIXTURE_STATUSES.has(statusShort)) {
+        await this.handleStatusChange({
+          fixture,
+          fixtureId,
+          leagueId,
+          previousStatus: null,
+          currentStatus: statusShort,
+        });
+      }
+
       await this.snapshotRepository.save(
         this.snapshotRepository.create({
           fixtureId,
@@ -400,18 +446,6 @@ export class LiveFixtureNotificationWorker
           lastCheckedAt: new Date(),
         }),
       );
-
-      if (statusShort === '1H' && elapsed !== null && elapsed <= 2) {
-        await this.sendStatusNotification({
-          fixture,
-          fixtureId,
-          leagueId,
-          statusShort,
-          title: 'Kickoff',
-          body: `${fixture.teams.home.name} vs ${fixture.teams.away.name} has started`,
-          type: NotificationType.MATCH_STARTED,
-        });
-      }
 
       return;
     }
@@ -454,6 +488,12 @@ export class LiveFixtureNotificationWorker
       }
     }
 
+    await this.processCardEvents({
+      fixture,
+      fixtureId,
+      leagueId,
+    });
+
     if (snapshot.statusShort !== statusShort) {
       await this.handleStatusChange({
         fixture,
@@ -463,12 +503,6 @@ export class LiveFixtureNotificationWorker
         currentStatus: statusShort,
       });
     }
-
-    await this.processCardEvents({
-      fixture,
-      fixtureId,
-      leagueId,
-    });
 
     snapshot.homeGoals = homeGoals;
     snapshot.awayGoals = awayGoals;
@@ -498,7 +532,7 @@ export class LiveFixtureNotificationWorker
       });
     }
 
-    if (['FT', 'AET', 'PEN'].includes(params.currentStatus)) {
+    if (COMPLETED_FIXTURE_STATUSES.has(params.currentStatus)) {
       const homeGoals = params.fixture.goals.home ?? 0;
       const awayGoals = params.fixture.goals.away ?? 0;
 
@@ -511,6 +545,74 @@ export class LiveFixtureNotificationWorker
         body: `${params.fixture.teams.home.name} ${homeGoals}-${awayGoals} ${params.fixture.teams.away.name}`,
         type: NotificationType.FULL_TIME,
       });
+    }
+
+    if (REMOVED_FIXTURE_STATUSES.has(params.currentStatus)) {
+      await this.cleanupFixtureFollowData(
+        params.fixtureId,
+        params.currentStatus,
+      );
+    }
+  }
+
+  private async reconcileMissingFollowedFixtures(
+    liveFixtureIds: Set<string>,
+  ): Promise<void> {
+    const activeFollowedFixtureIds =
+      await this.followsService.findActiveFixtureFollowIds();
+
+    if (!activeFollowedFixtureIds.length) {
+      return;
+    }
+
+    const trackedLiveSnapshots = await this.snapshotRepository.find({
+      where: {
+        fixtureId: In(activeFollowedFixtureIds),
+        statusShort: In(RECONCILABLE_LIVE_STATUSES),
+      },
+    });
+
+    for (const snapshot of trackedLiveSnapshots) {
+      if (liveFixtureIds.has(snapshot.fixtureId)) {
+        continue;
+      }
+
+      try {
+        const fixtureData = (await this.footballService.getFixtureById(
+          snapshot.fixtureId,
+        )) as ApiFootballLiveFixturesResponse;
+
+        const fixture = fixtureData.response?.[0];
+
+        if (!fixture) {
+          continue;
+        }
+
+        await this.processFixture(fixture);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to reconcile missing live fixture ${snapshot.fixtureId}`,
+          error as Error,
+        );
+      }
+    }
+  }
+
+  private async cleanupFixtureFollowData(
+    fixtureId: string,
+    statusShort: string,
+  ): Promise<void> {
+    const [deletedFollows, deletedEntitySettings] = await Promise.all([
+      this.followsService.deleteFixtureFollowsByFixtureId(fixtureId),
+      this.notificationPreferencesService.deleteFixtureEntitySettingsByFixtureId(
+        fixtureId,
+      ),
+    ]);
+
+    if (deletedFollows > 0 || deletedEntitySettings > 0) {
+      this.logger.log(
+        `Fixture follow cleanup completed for ${fixtureId} (${statusShort}). Follows deleted: ${deletedFollows}, settings deleted: ${deletedEntitySettings}`,
+      );
     }
   }
 

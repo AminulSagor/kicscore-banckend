@@ -21,6 +21,13 @@ type FollowOwner =
       installationId: string;
     };
 
+const VISIBLE_FOLLOW_ENTITY_TYPES = [
+  FollowEntityType.LEAGUE,
+  FollowEntityType.TEAM,
+  FollowEntityType.PLAYER,
+  FollowEntityType.COACH,
+];
+
 @Injectable()
 export class FollowsService {
   constructor(
@@ -107,14 +114,15 @@ export class FollowsService {
   ): Promise<Follow[]> {
     const owner = this.resolveOwner(user, query.installationId);
 
+    if (query.entityType === FollowEntityType.FIXTURE) {
+      return [];
+    }
+
     const where: FindOptionsWhere<Follow> = {
       ...this.getOwnerWhere(owner),
+      entityType: query.entityType ?? In(VISIBLE_FOLLOW_ENTITY_TYPES),
       isActive: true,
     };
-
-    if (query.entityType) {
-      where.entityType = query.entityType;
-    }
 
     return this.followRepository.find({
       where,
@@ -244,6 +252,26 @@ export class FollowsService {
         metadataItems: true,
       },
     });
+  }
+
+  async findActiveFixtureFollowIds(): Promise<string[]> {
+    const follows = await this.followRepository.find({
+      where: {
+        entityType: FollowEntityType.FIXTURE,
+        isActive: true,
+      },
+    });
+
+    return [...new Set(follows.map((follow) => follow.entityId))];
+  }
+
+  async deleteFixtureFollowsByFixtureId(fixtureId: string): Promise<number> {
+    const result = await this.followRepository.delete({
+      entityType: FollowEntityType.FIXTURE,
+      entityId: String(fixtureId),
+    });
+
+    return result.affected ?? 0;
   }
 
   private async getFollowById(followId: string): Promise<Follow> {

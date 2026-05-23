@@ -17,6 +17,7 @@ import { NewsNotificationWorkerState } from './entities/news-notification-worker
 import { FollowsModule } from 'src/modules/follows/follows.module';
 import { NotificationsModule } from 'src/notifications/notifications.module';
 import { NewsNotificationWorker } from './services/news-notification.worker';
+import { FilesModule } from 'src/modules/files/files.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { NewsNotificationWorker } from './services/news-notification.worker';
     ]),
     FollowsModule,
     NotificationsModule,
+    FilesModule,
   ],
   controllers: [TheNewsController],
   providers: [
