@@ -149,6 +149,25 @@ export class FilesService {
     };
   }
 
+  // createSignedReadUrl method by system
+  async createSystemSignedReadUrl(fileId: string): Promise<string | null> {
+    const file = await this.fileRepository.findOne({
+      where: {
+        id: fileId,
+      },
+    });
+
+    if (!file || file.status !== FileStatus.UPLOADED) {
+      return null;
+    }
+
+    const signedUrlResult = await this.s3Service.createSignedReadUrl(
+      file.fileKey,
+    );
+
+    return signedUrlResult.signedUrl;
+  }
+
   async deleteFile(userId: string, fileId: string): Promise<void> {
     const file = await this.fileRepository.findOne({
       where: {

@@ -12,10 +12,14 @@ import {
   SimilarNewsResponse,
   mapNewsArticleResponse,
 } from '../types/news-article-response.type';
+import { FilesService } from 'src/modules/files/files.service';
 
 @Controller('news')
 export class TheNewsController {
-  constructor(private readonly theNewsService: TheNewsService) {}
+  constructor(
+    private readonly theNewsService: TheNewsService,
+    private readonly filesService: FilesService,
+  ) {}
 
   @Public()
   @Get()
@@ -64,9 +68,11 @@ export class TheNewsController {
   ): Promise<ControllerResponse<NewsArticleResponse>> {
     const article = await this.theNewsService.getArticleByUuid(uuid);
 
+    const mappedData = await mapNewsArticleResponse(article, this.filesService);
+
     return {
       message: 'News article fetched successfully',
-      data: mapNewsArticleResponse(article),
+      data: mappedData,
     };
   }
 }

@@ -9,6 +9,7 @@ import { UpdateEntityNotificationSettingDto } from './dto/update-entity-notifica
 import { UpdateNotificationPreferenceDto } from './dto/update-notification-preference.dto';
 import { EntityNotificationSetting } from './entities/entity-notification-setting.entity';
 import { NotificationPreference } from './entities/notification-preference.entity';
+import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.enum';
 
 interface NotificationOwner {
   userId: string | null;
@@ -106,6 +107,17 @@ export class NotificationPreferencesService {
     setting.newsEnabled = dto.newsEnabled ?? setting.newsEnabled;
 
     return this.entitySettingRepository.save(setting);
+  }
+
+  async deleteFixtureEntitySettingsByFixtureId(
+    fixtureId: string,
+  ): Promise<number> {
+    const result = await this.entitySettingRepository.delete({
+      entityType: FollowEntityType.FIXTURE,
+      entityId: String(fixtureId),
+    });
+
+    return result.affected ?? 0;
   }
 
   private async getOrCreatePreference(

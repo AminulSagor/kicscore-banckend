@@ -23,10 +23,17 @@ import { UpdateAdminProfileDto } from './dto/update-admin-profile.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { ChangePasswordDto } from '../users/dto/change-password.dto';
+import { TheNewsService } from 'src/the-news/services/the-news.service';
+import { CreateCustomNewsDto } from 'src/the-news/dto/create-custom-news.dto';
+import { UpdateCustomNewsDto } from 'src/the-news/dto/update-custom-news.dto';
+import { AdminNewsQueryDto } from 'src/the-news/dto/admin-news-query.dto';
 
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly theNewsService: TheNewsService,
+  ) {}
 
   @UseGuards(AdminGuard)
   @Get('dashboard/overview')
@@ -185,6 +192,85 @@ export class AdminController {
     return {
       message: 'Admin password changed successfully',
       data,
+    };
+  }
+
+  @UseGuards(AdminGuard)
+  @Post('news')
+  async createCustomNews(
+    @CurrentUser() adminUser: JwtPayload,
+    @Body() dto: CreateCustomNewsDto,
+  ): Promise<ControllerResponse<unknown>> {
+    const data = await this.theNewsService.createCustomArticle(
+      adminUser.sub,
+      dto,
+    );
+
+    return {
+      message: 'Custom sports news created successfully',
+      data,
+    };
+  }
+
+  // 1. Get All News (External + Custom)
+  @UseGuards(AdminGuard)
+  @Get('news')
+  async getAllNews(
+    @Query() query: AdminNewsQueryDto,
+  ): Promise<ControllerResponse<unknown>> {
+    const data = await this.theNewsService.getAdminNews(query, false);
+
+    return {
+      message: 'All news fetched successfully',
+      data,
+    };
+  }
+
+  // 2. Get "Own" (Custom) News
+  @UseGuards(AdminGuard)
+  @Get('news/custom')
+  async getCustomNews(
+    @Query() query: AdminNewsQueryDto,
+  ): Promise<ControllerResponse<unknown>> {
+    const data = await this.theNewsService.getAdminNews(query, true);
+
+    return {
+      message: 'Custom news fetched successfully',
+      data,
+    };
+  }
+
+  // 3. Edit Custom News
+  @UseGuards(AdminGuard)
+  @Patch('news/:uuid')
+  async updateCustomNews(
+    @CurrentUser() adminUser: JwtPayload,
+    @Param('uuid') uuid: string,
+    @Body() dto: UpdateCustomNewsDto,
+  ): Promise<ControllerResponse<unknown>> {
+    const data = await this.theNewsService.updateCustomArticle(
+      adminUser.sub,
+      uuid,
+      dto,
+    );
+
+    return {
+      message: 'Custom news updated successfully',
+      data,
+    };
+  }
+
+  // 4. Delete Any News
+  @UseGuards(AdminGuard)
+  @Delete('news/:uuid')
+  async deleteNews(
+    @Param('uuid') uuid: string,
+  ): Promise<ControllerResponse<null>> {
+    await this.theNewsService.deleteArticle(uuid);
+
+    return {
+      message: 'News article deleted successfully',
+      data: null,
     };
   }
 }
