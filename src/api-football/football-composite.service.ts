@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.enum';
 import { FollowsService } from 'src/modules/follows/follows.service';
@@ -67,6 +67,9 @@ interface ApiFootballWrapped<T> {
   results?: number;
 }
 
+const COMPLETED_FIXTURE_STATUSES = new Set(['FT', 'AET', 'PEN']);
+const MAX_COACH_RECORD_SEASONS = 20;
+
 @Injectable()
 export class FootballCompositeService {
   constructor(
@@ -82,6 +85,67 @@ export class FootballCompositeService {
     @InjectRepository(TeamTrophyPreviewSeason)
     private readonly teamTrophySeasonRepository: Repository<TeamTrophyPreviewSeason>,
   ) {}
+
+  private getCoachRecordSeasons(from: string, to: string): string[] {
+    const fromDate = new Date(`${from}T00:00:00.000Z`);
+    const toDate = new Date(`${to}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(fromDate.getTime()) ||
+      Number.isNaN(toDate.getTime()) ||
+      fromDate > toDate
+    ) {
+      throw new BadRequestException('from must be earlier than or equal to to');
+    }
+
+    const startYear = fromDate.getUTCFullYear();
+    const endYear = toDate.getUTCFullYear();
+    const totalSeasons = endYear - startYear + 1;
+
+    if (totalSeasons > MAX_COACH_RECORD_SEASONS) {
+      throw new BadRequestException(
+        `Coach record period cannot exceed ${MAX_COACH_RECORD_SEASONS} seasons`,
+      );
+    }
+
+    return Array.from({ length: totalSeasons }, (_, index) => {
+      return String(startYear + index);
+    });
+  }
+
+  private removeDuplicateFixtures(fixtures: FixtureItem[]): FixtureItem[] {
+    const fixtureMap = new Map<number, FixtureItem>();
+
+    for (const fixture of fixtures) {
+      const fixtureId = fixture.fixture?.id;
+
+      if (fixtureId !== undefined) {
+        fixtureMap.set(fixtureId, fixture);
+      }
+    }
+
+    return Array.from(fixtureMap.values());
+  }
+
+  private isFixtureInsidePeriod(
+    fixture: FixtureItem,
+    from: string,
+    to: string,
+  ): boolean {
+    const fixtureDate = fixture.fixture?.date?.slice(0, 10);
+
+    if (!fixtureDate) {
+      return false;
+    }
+
+    return fixtureDate >= from && fixtureDate <= to;
+  }
+
+  private isCompletedFixture(fixture: FixtureItem): boolean {
+    const status = fixture.fixture?.status?.short;
+
+    return status ? COMPLETED_FIXTURE_STATUSES.has(status) : false;
+  }
 
   async withFollowMeta<T extends object>(
     data: T,
@@ -1967,7 +2031,9 @@ export class FootballCompositeService {
     query: FootballCompositeQueryDto,
     followContext?: FollowContext,
   ) {
-    if (!query.team || !query.from || !query.to) {
+    const { team: teamId, from, to } = query;
+
+    if (!teamId || !from || !to) {
       return this.withFollowMeta(
         {
           coachId,
@@ -1978,29 +2044,59 @@ export class FootballCompositeService {
       );
     }
 
-    const fixtures = (await this.footballService.getTeamFixtures(query.team, {
-      from: query.from,
-      to: query.to,
-    })) as ApiFootballWrapped<any>;
+    const seasons = this.getCoachRecordSeasons(from, to);
 
-    const response = fixtures.response ?? [];
+    const fixtureResponses = await Promise.all(
+      seasons.map((season) => {
+        return this.footballService.getTeamFixtures(teamId, {
+          season,
+        });
+      }),
+    );
+
+    const allFixtures = fixtureResponses.flatMap((fixtureResponse) => {
+      const data = fixtureResponse as ApiFootballWrapped<FixtureItem>;
+
+      return data.response ?? [];
+    });
+
+    const completedFixtures = this.removeDuplicateFixtures(allFixtures).filter(
+      (fixture) => {
+        return (
+          this.isFixtureInsidePeriod(fixture, from, to) &&
+          this.isCompletedFixture(fixture)
+        );
+      },
+    );
 
     let wins = 0;
     let draws = 0;
     let losses = 0;
 
-    for (const fixture of response) {
+    for (const fixture of completedFixtures) {
       const homeTeamId = String(fixture.teams?.home?.id);
       const awayTeamId = String(fixture.teams?.away?.id);
-      const homeGoals = fixture.goals?.home ?? 0;
-      const awayGoals = fixture.goals?.away ?? 0;
+      const homeGoals = fixture.goals?.home;
+      const awayGoals = fixture.goals?.away;
+
+      if (homeGoals === null || homeGoals === undefined) {
+        continue;
+      }
+
+      if (awayGoals === null || awayGoals === undefined) {
+        continue;
+      }
 
       if (homeGoals === awayGoals) {
         draws += 1;
-      } else if (
-        (homeTeamId === query.team && homeGoals > awayGoals) ||
-        (awayTeamId === query.team && awayGoals > homeGoals)
-      ) {
+        continue;
+      }
+
+      const teamWon =
+        (homeTeamId === teamId && homeGoals > awayGoals) ||
+        (awayTeamId === teamId && awayGoals > homeGoals);
+
+      if (teamWon) {
         wins += 1;
       } else {
         losses += 1;
@@ -2010,11 +2106,12 @@ export class FootballCompositeService {
     return this.withFollowMeta(
       {
         coachId,
-        teamId: query.team,
-        from: query.from,
-        to: query.to,
+        teamId,
+        from,
+        to,
+        seasons,
         record: {
-          matches: response.length,
+          matches: completedFixtures.length,
           wins,
           draws,
           losses,
