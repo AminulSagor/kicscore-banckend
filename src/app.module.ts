@@ -17,6 +17,7 @@ import { FollowsModule } from './modules/follows/follows.module';
 import { TheNewsModule } from './the-news/the-news.module';
 import { FootballNotificationsModule } from './modules/football-notifications/football-notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { FootballHistoryModule } from './modules/fifa-world-cup/football-history.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AdminModule } from './modules/admin/admin.module';
     FollowsModule,
     TheNewsModule,
     FootballNotificationsModule,
+    FootballHistoryModule,
   ],
   providers: [
     {

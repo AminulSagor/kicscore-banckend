@@ -39,6 +39,10 @@ export const apiFootballCacheConfig = {
     ttl: getNumberEnv('CACHE_TTL_FIXTURES_PAST_SECONDS', 86400),
     staleTtl: getNumberEnv('CACHE_STALE_FIXTURES_PAST_SECONDS', 604800),
   },
+  worldCupFinal: {
+    ttl: getNumberEnv('CACHE_TTL_WORLD_CUP_FINAL_SECONDS', 86400),
+    staleTtl: getNumberEnv('CACHE_STALE_WORLD_CUP_FINAL_SECONDS', 604800),
+  },
   lineupsBeforeFound: {
     ttl: getNumberEnv('CACHE_TTL_LINEUPS_BEFORE_FOUND_SECONDS', 600),
     staleTtl: getNumberEnv('CACHE_STALE_LINEUPS_BEFORE_FOUND_SECONDS', 1800),
