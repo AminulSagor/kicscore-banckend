@@ -77,4 +77,14 @@ export class FootballCompositeQueryDto {
   @Transform(trimString)
   @IsIn(['TEAM', 'LEAGUE', 'PLAYER'])
   entityType?: 'TEAM' | 'LEAGUE' | 'PLAYER';
+
+  @IsOptional()
+  @Transform(trimString)
+  @Matches(NUMBER_REGEX)
+  transferPage?: string;
+
+  @IsOptional()
+  @Transform(trimString)
+  @Matches(NUMBER_REGEX)
+  transferLimit?: string;
 }

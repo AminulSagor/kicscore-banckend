@@ -320,6 +320,87 @@ export class FootballService {
     );
   }
 
+  getPlayerCareerSeasonStats(
+    playerId: string,
+    season: number,
+    isCurrentSeason: boolean,
+  ): Promise<ApiFootballResponse> {
+    const endpoint = '/players';
+    const params: QueryParams = {
+      id: playerId,
+      season,
+    };
+
+    const cacheKey = `api-football:player-career:${
+      isCurrentSeason ? 'current' : 'history'
+    }:${buildApiFootballCacheKey(endpoint, params)}`;
+
+    const ttlSeconds = isCurrentSeason
+      ? this.toPositiveNumber(
+          process.env.CACHE_TTL_PLAYER_CAREER_CURRENT_SECONDS,
+          1800,
+        )
+      : this.toPositiveNumber(
+          process.env.CACHE_TTL_PLAYER_CAREER_HISTORY_SECONDS,
+          2592000,
+        );
+
+    const staleTtlSeconds = isCurrentSeason
+      ? this.toPositiveNumber(
+          process.env.CACHE_STALE_PLAYER_CAREER_CURRENT_SECONDS,
+          7200,
+        )
+      : this.toPositiveNumber(
+          process.env.CACHE_STALE_PLAYER_CAREER_HISTORY_SECONDS,
+          5184000,
+        );
+
+    return this.apiFootballCacheService.getCached<ApiFootballResponse>({
+      endpoint,
+      params,
+      cacheKey,
+      ttlSeconds,
+      staleTtlSeconds,
+      lockTtlSeconds: 10,
+      priority: ApiFootballRequestPriority.LOW,
+    });
+  }
+
+  getPlayerCareerTransfers(
+    playerId: string,
+    weeklyRefresh = false,
+  ): Promise<ApiFootballResponse> {
+    const endpoint = '/transfers';
+    const params: QueryParams = {
+      player: playerId,
+    };
+
+    const refreshSegment = weeklyRefresh
+      ? `weekly:${new Date().toISOString().slice(0, 10)}`
+      : 'initial';
+
+    const cacheKey = `api-football:player-career:transfers:${refreshSegment}:${buildApiFootballCacheKey(
+      endpoint,
+      params,
+    )}`;
+
+    return this.apiFootballCacheService.getCached<ApiFootballResponse>({
+      endpoint,
+      params,
+      cacheKey,
+      ttlSeconds: this.toPositiveNumber(
+        process.env.CACHE_TTL_PLAYER_CAREER_TRANSFERS_SECONDS,
+        604800,
+      ),
+      staleTtlSeconds: this.toPositiveNumber(
+        process.env.CACHE_STALE_PLAYER_CAREER_TRANSFERS_SECONDS,
+        1209600,
+      ),
+      lockTtlSeconds: 10,
+      priority: ApiFootballRequestPriority.LOW,
+    });
+  }
+
   getInjuries(query: QueryParams): Promise<ApiFootballResponse> {
     return this.cachedPaginated(
       '/injuries',

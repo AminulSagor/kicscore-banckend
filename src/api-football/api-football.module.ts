@@ -10,6 +10,11 @@ import { TeamTrophyPreviewGroup } from './entities/team-trophy-preview-group.ent
 import { TeamTrophyPreviewSeason } from './entities/team-trophy-preview-season.entity';
 import { TeamTrophyPreviewWorker } from './workers/team-trophy-preview.worker';
 import { TeamTrophyPreviewTarget } from './entities/team-trophy-preview-target.entity';
+import { PlayerCareerSyncState } from './entities/player-career-sync-state.entity';
+import { PlayerCareerSeasonStat } from './entities/player-career-season-stat.entity';
+import { PlayerCareerTransferSnapshot } from './entities/player-career-transfer-snapshot.entity';
+import { PlayerCareerService } from './player-career.service';
+import { PlayerCareerCacheWorker } from './workers/player-career-cache.worker';
 
 @Module({
   imports: [
@@ -17,6 +22,9 @@ import { TeamTrophyPreviewTarget } from './entities/team-trophy-preview-target.e
       TeamTrophyPreviewTarget,
       TeamTrophyPreviewGroup,
       TeamTrophyPreviewSeason,
+      PlayerCareerSyncState,
+      PlayerCareerSeasonStat,
+      PlayerCareerTransferSnapshot,
     ]),
     FollowsModule,
   ],
@@ -26,8 +34,15 @@ import { TeamTrophyPreviewTarget } from './entities/team-trophy-preview-target.e
     ApiFootballCacheService,
     FootballService,
     FootballCompositeService,
+    PlayerCareerService,
     TeamTrophyPreviewWorker,
+    PlayerCareerCacheWorker,
   ],
-  exports: [FootballService, ApiFootballCacheService, FootballCompositeService],
+  exports: [
+    FootballService,
+    ApiFootballCacheService,
+    FootballCompositeService,
+    PlayerCareerService,
+  ],
 })
 export class ApiFootballModule {}

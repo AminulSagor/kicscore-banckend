@@ -1872,39 +1872,6 @@ export class FootballCompositeService {
     return `${elapsed}'`;
   }
 
-  async getPlayerCareerTotals(
-    playerId: string,
-    query: FootballCompositeQueryDto,
-    followContext?: FollowContext,
-  ) {
-    const fromSeason = Number(query.fromSeason ?? 2020);
-    const toSeason = Number(query.toSeason ?? new Date().getFullYear());
-
-    const seasons = Array.from(
-      { length: toSeason - fromSeason + 1 },
-      (_, index) => fromSeason + index,
-    );
-
-    const rows = await Promise.all(
-      seasons.map(async (season) => {
-        const player = await this.footballService.getPlayers({
-          id: playerId,
-          season,
-        });
-
-        return {
-          season,
-          player,
-        };
-      }),
-    );
-
-    return this.withFollowMeta(
-      this.paginateArray(rows, query.page, query.limit),
-      followContext,
-    );
-  }
-
   async getPlayerTraits(
     playerId: string,
     query: FootballCompositeQueryDto,
