@@ -1,0 +1,19 @@
+league_id,league_name,season,winner_name,winner_logo,runner_up_name,runner_up_logo
+1,World Cup,1930,Uruguay,https://media.api-sports.io/football/teams/7.png,Argentina,https://media.api-sports.io/football/teams/26.png
+1,World Cup,1934,Italy,https://media.api-sports.io/football/teams/768.png,Czechoslovakia,https://media.api-sports.io/football/teams/770.png
+1,World Cup,1938,Italy,https://media.api-sports.io/football/teams/768.png,Hungary,https://media.api-sports.io/football/teams/769.png
+1,World Cup,1950,Uruguay,https://media.api-sports.io/football/teams/7.png,Brazil,https://media.api-sports.io/football/teams/6.png
+1,World Cup,1954,West Germany,https://media.api-sports.io/football/teams/25.png,Hungary,https://media.api-sports.io/football/teams/769.png
+1,World Cup,1958,Brazil,https://media.api-sports.io/football/teams/6.png,Sweden,https://media.api-sports.io/football/teams/5.png
+1,World Cup,1962,Brazil,https://media.api-sports.io/football/teams/6.png,Czechoslovakia,https://media.api-sports.io/football/teams/770.png
+1,World Cup,1966,England,https://media.api-sports.io/football/teams/10.png,West Germany,https://media.api-sports.io/football/teams/25.png
+1,World Cup,1970,Brazil,https://media.api-sports.io/football/teams/6.png,Italy,https://media.api-sports.io/football/teams/768.png
+1,World Cup,1974,West Germany,https://media.api-sports.io/football/teams/25.png,Netherlands,https://media.api-sports.io/football/teams/1118.png
+1,World Cup,1978,Argentina,https://media.api-sports.io/football/teams/26.png,Netherlands,https://media.api-sports.io/football/teams/1118.png
+1,World Cup,1982,Italy,https://media.api-sports.io/football/teams/768.png,West Germany,https://media.api-sports.io/football/teams/25.png
+1,World Cup,1986,Argentina,https://media.api-sports.io/football/teams/26.png,West Germany,https://media.api-sports.io/football/teams/25.png
+1,World Cup,1990,West Germany,https://media.api-sports.io/football/teams/25.png,Argentina,https://media.api-sports.io/football/teams/26.png
+1,World Cup,1994,Brazil,https://media.api-sports.io/football/teams/6.png,Italy,https://media.api-sports.io/football/teams/768.png
+1,World Cup,1998,France,https://media.api-sports.io/football/teams/2.png,Brazil,https://media.api-sports.io/football/teams/6.png
+1,World Cup,2002,Brazil,https://media.api-sports.io/football/teams/6.png,Germany,https://media.api-sports.io/football/teams/25.png
+1,World Cup,2006,Italy,https://media.api-sports.io/football/teams/768.png,France,https://media.api-sports.io/football/teams/2.png

@@ -378,7 +378,7 @@ export class FollowsService {
               },
             ]
           : []),
-        ...(params.installationId
+        ...(!params.userId && params.installationId
           ? [
               {
                 installationId: params.installationId,

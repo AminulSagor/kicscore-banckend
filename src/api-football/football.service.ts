@@ -231,6 +231,19 @@ export class FootballService {
     );
   }
 
+  getWorldCupFinalFixture(season: string): Promise<ApiFootballResponse> {
+    return this.cachedPaginated(
+      '/fixtures',
+      {
+        league: '1',
+        season,
+        round: 'Final',
+      },
+      apiFootballCacheConfig.worldCupFinal,
+      ApiFootballRequestPriority.LOW,
+    );
+  }
+
   getLeagues(query: QueryParams): Promise<ApiFootballResponse> {
     const cacheConfig = query.search
       ? apiFootballCacheConfig.search
