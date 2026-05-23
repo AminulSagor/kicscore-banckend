@@ -23,6 +23,7 @@ import { FollowEntityType } from 'src/modules/follows/enums/follow-entity-type.e
 import { FootballLeaguesByIdsQueryDto } from './dto/football-leagues-by-ids-query.dto';
 import { LeaguePlayerStatsQueryDto } from './dto/league-player-stats-query.dto';
 import { LeagueTeamStatsQueryDto } from './dto/league-team-stats-query.dto';
+import { PlayerCareerService } from './player-career.service';
 
 @Public()
 @Controller('football')
@@ -30,6 +31,7 @@ export class FootballController {
   constructor(
     private readonly footballService: FootballService,
     private readonly footballCompositeService: FootballCompositeService,
+    private readonly playerCareerService: PlayerCareerService,
   ) {}
 
   private buildFollowContext(
@@ -346,15 +348,19 @@ export class FootballController {
 
   @UseGuards(OptionalJwtAuthGuard)
   @Get('players/:playerId/career-totals')
-  getPlayerCareerTotals(
+  async getPlayerCareerTotals(
     @Param('playerId', ParseIntPipe) playerId: number,
     @Query() query: FootballCompositeQueryDto,
     @CurrentUser() user: JwtPayload | null,
     @Headers('x-installation-id') installationId?: string,
   ) {
-    return this.footballCompositeService.getPlayerCareerTotals(
+    const data = await this.playerCareerService.getPlayerCareerTotals(
       String(playerId),
       query,
+    );
+
+    return this.footballCompositeService.withFollowMeta(
+      data,
       this.buildFollowContext(
         user,
         installationId,
