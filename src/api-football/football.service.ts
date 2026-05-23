@@ -17,6 +17,16 @@ import {
   LeagueFixturesGroup,
 } from 'src/common/interfaces/api-football-custom-response.interface';
 import { BackendPaginationParams } from 'src/common/interfaces/pagination.interface';
+import {
+  FootballSearchApiResponse,
+  FootballSearchLeagueItem,
+  FootballSearchPlayerItem,
+} from './types/football-search.type';
+import {
+  FootballSearchPromotion,
+  LEAGUE_SEARCH_PROMOTIONS,
+  PLAYER_SEARCH_PROMOTIONS,
+} from 'src/common/constants/football-search-ranking.constant';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
@@ -244,12 +254,131 @@ export class FootballService {
     );
   }
 
-  getLeagues(query: QueryParams): Promise<ApiFootballResponse> {
-    const cacheConfig = query.search
-      ? apiFootballCacheConfig.search
-      : apiFootballCacheConfig.leagueProfile;
+  async getLeagues(query: QueryParams): Promise<ApiFootballResponse> {
+    if (this.hasSearchText(query.search)) {
+      return this.searchLeaguesWithRanking(query);
+    }
 
-    return this.cachedPaginated('/leagues', query, cacheConfig);
+    return this.cachedPaginated(
+      '/leagues',
+      query,
+      apiFootballCacheConfig.leagueProfile,
+    );
+  }
+
+  //======= Enhanced League Search =======//
+
+  private async searchLeaguesWithRanking(
+    query: QueryParams,
+  ): Promise<ApiFootballResponse> {
+    const search = String(query.search).trim();
+    const normalizedSearch = this.normalizeSearchText(search);
+    const upstreamQuery = this.removeBackendPagination(query);
+
+    const rawResponse = (await this.cached(
+      '/leagues',
+      upstreamQuery,
+      apiFootballCacheConfig.search,
+    )) as unknown as FootballSearchApiResponse<FootballSearchLeagueItem>;
+
+    const sourceItems = rawResponse.response ?? [];
+    const existingIds = new Set(
+      sourceItems
+        .map((item) => item.league?.id)
+        .filter((id): id is number => typeof id === 'number'),
+    );
+
+    const matchingPromotions = LEAGUE_SEARCH_PROMOTIONS.filter((promotion) => {
+      return this.isPromotionMatch(normalizedSearch, promotion);
+    });
+
+    const missingPromotions = matchingPromotions.filter((promotion) => {
+      return !existingIds.has(promotion.id);
+    });
+
+    const supplementalItems =
+      await this.fetchPromotedLeagues(missingPromotions);
+
+    const mergedItems = this.mergeLeagueItems(sourceItems, supplementalItems);
+
+    const rankedItems = mergedItems
+      .map((item, index) => ({
+        item,
+        index,
+        score: this.getLeagueSearchScore(item, normalizedSearch),
+      }))
+      .sort((left, right) => {
+        return right.score - left.score || left.index - right.index;
+      })
+      .map((row) => row.item);
+
+    return this.paginateEnhancedSearchResponse(
+      rawResponse,
+      rankedItems,
+      query.page,
+      query.limit,
+    );
+  }
+
+  private async fetchPromotedLeagues(
+    promotions: readonly FootballSearchPromotion[],
+  ): Promise<FootballSearchLeagueItem[]> {
+    if (!promotions.length) {
+      return [];
+    }
+
+    const responses = await Promise.all(
+      promotions.map(async (promotion) => {
+        const response = (await this.cached(
+          '/leagues',
+          {
+            id: String(promotion.id),
+          },
+          apiFootballCacheConfig.leagueProfile,
+        )) as unknown as FootballSearchApiResponse<FootballSearchLeagueItem>;
+
+        return response.response ?? [];
+      }),
+    );
+
+    return responses.flat();
+  }
+
+  private mergeLeagueItems(
+    sourceItems: FootballSearchLeagueItem[],
+    supplementalItems: FootballSearchLeagueItem[],
+  ): FootballSearchLeagueItem[] {
+    const map = new Map<number, FootballSearchLeagueItem>();
+
+    for (const item of [...supplementalItems, ...sourceItems]) {
+      const id = item.league?.id;
+
+      if (typeof id === 'number') {
+        map.set(id, item);
+      }
+    }
+
+    return Array.from(map.values());
+  }
+
+  private getLeagueSearchScore(
+    item: FootballSearchLeagueItem,
+    normalizedSearch: string,
+  ): number {
+    const leagueId = item.league?.id;
+    const leagueName = item.league?.name ?? '';
+
+    const promotion = LEAGUE_SEARCH_PROMOTIONS.find((entry) => {
+      return entry.id === leagueId;
+    });
+
+    const nameScore = this.getSearchTextScore(normalizedSearch, leagueName);
+
+    const promotionScore = promotion
+      ? this.getPromotionScore(normalizedSearch, promotion)
+      : 0;
+
+    return Math.max(nameScore, promotionScore);
   }
 
   getCountries(query: QueryParams): Promise<ApiFootballResponse> {
@@ -465,12 +594,139 @@ export class FootballService {
     );
   }
 
-  getPlayerProfiles(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cachedPaginated(
+  async getPlayerProfiles(query: QueryParams): Promise<ApiFootballResponse> {
+    if (!this.hasSearchText(query.search)) {
+      return this.cachedPaginated(
+        '/players/profiles',
+        query,
+        apiFootballCacheConfig.search,
+      );
+    }
+
+    return this.searchPlayerProfilesWithRanking(query);
+  }
+
+  //======= Enhanced Player Search =======//
+
+  private async searchPlayerProfilesWithRanking(
+    query: QueryParams,
+  ): Promise<ApiFootballResponse> {
+    const search = String(query.search).trim();
+    const normalizedSearch = this.normalizeSearchText(search);
+    const upstreamQuery = this.removeBackendPagination(query);
+
+    const rawResponse = (await this.cached(
       '/players/profiles',
-      query,
+      upstreamQuery,
       apiFootballCacheConfig.search,
+    )) as unknown as FootballSearchApiResponse<FootballSearchPlayerItem>;
+
+    const sourceItems = rawResponse.response ?? [];
+
+    const existingIds = new Set(
+      sourceItems
+        .map((item) => item.player?.id)
+        .filter((id): id is number => typeof id === 'number'),
     );
+
+    const matchingPromotions = PLAYER_SEARCH_PROMOTIONS.filter((promotion) => {
+      return this.isPromotionMatch(normalizedSearch, promotion);
+    });
+
+    const missingPromotions = matchingPromotions.filter((promotion) => {
+      return !existingIds.has(promotion.id);
+    });
+
+    const supplementalItems =
+      await this.fetchPromotedPlayers(missingPromotions);
+
+    const mergedItems = this.mergePlayerItems(sourceItems, supplementalItems);
+
+    const rankedItems = mergedItems
+      .map((item, index) => ({
+        item,
+        index,
+        score: this.getPlayerSearchScore(item, normalizedSearch),
+      }))
+      .sort((left, right) => {
+        return right.score - left.score || left.index - right.index;
+      })
+      .map((row) => row.item);
+
+    return this.paginateEnhancedSearchResponse(
+      rawResponse,
+      rankedItems,
+      query.page,
+      query.limit,
+    );
+  }
+
+  private async fetchPromotedPlayers(
+    promotions: readonly FootballSearchPromotion[],
+  ): Promise<FootballSearchPlayerItem[]> {
+    if (!promotions.length) {
+      return [];
+    }
+
+    const responses = await Promise.all(
+      promotions.map(async (promotion) => {
+        const response = (await this.cached(
+          '/players/profiles',
+          {
+            player: String(promotion.id),
+          },
+          apiFootballCacheConfig.search,
+        )) as unknown as FootballSearchApiResponse<FootballSearchPlayerItem>;
+
+        return response.response ?? [];
+      }),
+    );
+
+    return responses.flat();
+  }
+
+  private mergePlayerItems(
+    sourceItems: FootballSearchPlayerItem[],
+    supplementalItems: FootballSearchPlayerItem[],
+  ): FootballSearchPlayerItem[] {
+    const map = new Map<number, FootballSearchPlayerItem>();
+
+    for (const item of [...supplementalItems, ...sourceItems]) {
+      const id = item.player?.id;
+
+      if (typeof id === 'number') {
+        map.set(id, item);
+      }
+    }
+
+    return Array.from(map.values());
+  }
+
+  private getPlayerSearchScore(
+    item: FootballSearchPlayerItem,
+    normalizedSearch: string,
+  ): number {
+    const playerId = item.player?.id;
+
+    const searchableName = [
+      item.player?.name,
+      item.player?.firstname,
+      item.player?.lastname,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(' ');
+
+    const promotion = PLAYER_SEARCH_PROMOTIONS.find((entry) => {
+      return entry.id === playerId;
+    });
+
+    const nameScore = this.getSearchTextScore(normalizedSearch, searchableName);
+
+    const promotionScore = promotion
+      ? this.getPromotionScore(normalizedSearch, promotion)
+      : 0;
+
+    return Math.max(nameScore, promotionScore);
   }
 
   private toPositiveNumber(value: unknown, fallback: number): number {
@@ -652,7 +908,7 @@ export class FootballService {
 
     const search = query.trim();
 
-    const paginationParams = {
+    const paginationParams: QueryParams = {
       page: options?.page,
       limit: options?.limit,
     };
@@ -667,23 +923,15 @@ export class FootballService {
         apiFootballCacheConfig.search,
       ),
 
-      this.cachedPaginated(
-        '/leagues',
-        {
-          search,
-          ...paginationParams,
-        },
-        apiFootballCacheConfig.search,
-      ),
+      this.getLeagues({
+        search,
+        ...paginationParams,
+      }),
 
-      this.cachedPaginated(
-        '/players/profiles',
-        {
-          search,
-          ...paginationParams,
-        },
-        apiFootballCacheConfig.search,
-      ),
+      this.getPlayerProfiles({
+        search,
+        ...paginationParams,
+      }),
     ]);
 
     return {
@@ -691,6 +939,154 @@ export class FootballService {
       leagues,
       players,
     };
+  }
+
+  //======= Search Ranking Helpers =======//
+
+  private hasSearchText(value: unknown): boolean {
+    return typeof value === 'string' && value.trim().length > 0;
+  }
+
+  private removeBackendPagination(query: QueryParams): QueryParams {
+    const { page: _page, limit: _limit, ...upstreamQuery } = query;
+
+    return upstreamQuery;
+  }
+
+  private isPromotionMatch(
+    normalizedSearch: string,
+    promotion: FootballSearchPromotion,
+  ): boolean {
+    return promotion.aliases.some((alias) => {
+      return this.getSearchTextScore(normalizedSearch, alias) >= 5000;
+    });
+  }
+
+  private getPromotionScore(
+    normalizedSearch: string,
+    promotion: FootballSearchPromotion,
+  ): number {
+    const bestAliasScore = Math.max(
+      ...promotion.aliases.map((alias) => {
+        return this.getSearchTextScore(normalizedSearch, alias);
+      }),
+      0,
+    );
+
+    return bestAliasScore > 0 ? bestAliasScore + promotion.priority : 0;
+  }
+
+  private getSearchTextScore(
+    normalizedSearch: string,
+    candidate: string,
+  ): number {
+    const normalizedCandidate = this.normalizeSearchText(candidate);
+
+    if (!normalizedCandidate) {
+      return 0;
+    }
+
+    if (normalizedCandidate === normalizedSearch) {
+      return 10000;
+    }
+
+    if (normalizedCandidate.startsWith(normalizedSearch)) {
+      return 8000;
+    }
+
+    const candidateWords = normalizedCandidate.split(' ');
+
+    if (candidateWords.includes(normalizedSearch)) {
+      return 7500;
+    }
+
+    if (normalizedCandidate.includes(normalizedSearch)) {
+      return 6000;
+    }
+
+    if (
+      normalizedSearch.length >= 4 &&
+      this.getLevenshteinDistance(normalizedSearch, normalizedCandidate) <= 1
+    ) {
+      return 5000;
+    }
+
+    return 0;
+  }
+
+  private normalizeSearchText(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private getLevenshteinDistance(left: string, right: string): number {
+    const rows = left.length + 1;
+    const columns = right.length + 1;
+
+    const matrix = Array.from({ length: rows }, () => {
+      return Array<number>(columns).fill(0);
+    });
+
+    for (let row = 0; row < rows; row += 1) {
+      matrix[row][0] = row;
+    }
+
+    for (let column = 0; column < columns; column += 1) {
+      matrix[0][column] = column;
+    }
+
+    for (let row = 1; row < rows; row += 1) {
+      for (let column = 1; column < columns; column += 1) {
+        const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+
+        matrix[row][column] = Math.min(
+          matrix[row - 1][column] + 1,
+          matrix[row][column - 1] + 1,
+          matrix[row - 1][column - 1] + cost,
+        );
+      }
+    }
+
+    return matrix[left.length][right.length];
+  }
+
+  private paginateEnhancedSearchResponse<T>(
+    sourceResponse: FootballSearchApiResponse<T>,
+    rankedItems: T[],
+    pageValue?: string | number | boolean,
+    limitValue?: string | number | boolean,
+  ): ApiFootballResponse {
+    const hasPagination = pageValue !== undefined || limitValue !== undefined;
+
+    if (!hasPagination) {
+      return {
+        ...sourceResponse,
+        results: rankedItems.length,
+        response: rankedItems,
+      } as unknown as ApiFootballResponse;
+    }
+
+    const page = this.toPositiveNumber(pageValue, 1);
+    const limit = this.toPositiveNumber(limitValue, 10);
+    const totalItems = rankedItems.length;
+    const startIndex = (page - 1) * limit;
+
+    return {
+      ...sourceResponse,
+      results: totalItems,
+      response: rankedItems.slice(startIndex, startIndex + limit),
+      backendPaging: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+    } as unknown as ApiFootballResponse;
   }
 
   private cached(
