@@ -57,7 +57,7 @@ export class NotificationPreference {
   @Column({ name: 'player_alerts_enabled', type: 'boolean', default: true })
   playerAlertsEnabled: boolean;
 
-  @Column({ name: 'news_enabled', type: 'boolean', default: false })
+  @Column({ name: 'news_enabled', type: 'boolean', default: true })
   newsEnabled: boolean;
 
   @Column({ name: 'daily_digest_enabled', type: 'boolean', default: false })

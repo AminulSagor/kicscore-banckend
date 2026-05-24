@@ -31,7 +31,7 @@ import {
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
-
+type FixtureDateCacheState = 'past' | 'today' | 'future';
 type SearchPromotionLike = {
   aliases: readonly string[];
   priority: number;
@@ -50,11 +50,18 @@ export class FootballService {
     params: QueryParams,
     cacheConfig: { ttl: number; staleTtl: number },
     priority = ApiFootballRequestPriority.MEDIUM,
+    cacheKeySuffix?: string,
   ): Promise<ApiFootballResponse> {
     const { apiParams, page, limit, shouldPaginate } =
       this.extractBackendPaginationParams(params);
 
-    const data = await this.cached(endpoint, apiParams, cacheConfig, priority);
+    const data = await this.cached(
+      endpoint,
+      apiParams,
+      cacheConfig,
+      priority,
+      cacheKeySuffix,
+    );
 
     if (!shouldPaginate) {
       return data;
@@ -125,7 +132,13 @@ export class FootballService {
   }
 
   getFixtures(query: QueryParams): Promise<ApiFootballResponse> {
-    return this.cachedPaginated('/fixtures', query, this.getFixturesTtl(query));
+    return this.cachedPaginated(
+      '/fixtures',
+      query,
+      this.getFixturesTtl(query),
+      ApiFootballRequestPriority.MEDIUM,
+      this.getFixtureDateCacheSuffix(query),
+    );
   }
 
   getFixtureById(fixtureId: string): Promise<ApiFootballResponse> {
@@ -237,13 +250,17 @@ export class FootballService {
     teamId: string,
     query: QueryParams,
   ): Promise<ApiFootballResponse> {
+    const params: QueryParams = {
+      team: teamId,
+      ...query,
+    };
+
     return this.cachedPaginated(
       '/fixtures',
-      {
-        team: teamId,
-        ...query,
-      },
-      this.getFixturesTtl(query),
+      params,
+      this.getFixturesTtl(params),
+      ApiFootballRequestPriority.MEDIUM,
+      this.getFixtureDateCacheSuffix(params),
     );
   }
 
@@ -939,7 +956,7 @@ export class FootballService {
     ]);
 
     const upcomingStatuses = new Set(['NS', 'TBD']);
-    const finishedStatuses = new Set(['FT', 'AET', 'PEN', 'PSO']);
+    const finishedStatuses = new Set(['FT', 'AET', 'PEN', 'PSO', 'AWD', 'WO']);
 
     return fixtures.filter((fixture) => {
       const status = fixture.fixture.status.short;
@@ -1166,8 +1183,13 @@ export class FootballService {
     params: QueryParams,
     cacheConfig: { ttl: number; staleTtl: number },
     priority = ApiFootballRequestPriority.MEDIUM,
+    cacheKeySuffix?: string,
   ): Promise<ApiFootballResponse> {
-    const cacheKey = buildApiFootballCacheKey(endpoint, params);
+    const baseCacheKey = buildApiFootballCacheKey(endpoint, params);
+
+    const cacheKey = cacheKeySuffix
+      ? `${baseCacheKey}:${cacheKeySuffix}`
+      : baseCacheKey;
 
     return this.apiFootballCacheService.getCached<ApiFootballResponse>({
       endpoint,
@@ -1265,14 +1287,13 @@ export class FootballService {
     }
 
     if (query.date) {
-      const today = new Date().toISOString().slice(0, 10);
-      const date = String(query.date);
+      const dateState = this.getFixtureDateCacheState(query);
 
-      if (date === today) {
+      if (dateState === 'today') {
         return apiFootballCacheConfig.fixturesToday;
       }
 
-      if (date > today) {
+      if (dateState === 'future') {
         return apiFootballCacheConfig.fixturesFuture;
       }
 
@@ -1284,6 +1305,60 @@ export class FootballService {
     }
 
     return apiFootballCacheConfig.fixturesToday;
+  }
+
+  private getFixtureDateCacheSuffix(query: QueryParams): string | undefined {
+    if (!query.date) {
+      return undefined;
+    }
+
+    const dateState = this.getFixtureDateCacheState(query);
+
+    return `fixtures-date-v2:${dateState}`;
+  }
+
+  private getFixtureDateCacheState(query: QueryParams): FixtureDateCacheState {
+    const requestedDate = String(query.date);
+
+    const timezone =
+      typeof query.timezone === 'string' && query.timezone.trim().length > 0
+        ? query.timezone.trim()
+        : 'UTC';
+
+    const today = this.getCurrentDateInTimezone(timezone);
+
+    if (requestedDate === today) {
+      return 'today';
+    }
+
+    return requestedDate > today ? 'future' : 'past';
+  }
+
+  private getCurrentDateInTimezone(timezone: string): string {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date());
+
+      const year = parts.find((part) => part.type === 'year')?.value;
+      const month = parts.find((part) => part.type === 'month')?.value;
+      const day = parts.find((part) => part.type === 'day')?.value;
+
+      if (!year || !month || !day) {
+        throw new BadRequestException('Invalid timezone');
+      }
+
+      return `${year}-${month}-${day}`;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      throw new BadRequestException('Invalid timezone');
+    }
   }
 
   private getFixtureLineupsTtl(response: ApiFootballResponse): {
