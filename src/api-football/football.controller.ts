@@ -24,6 +24,11 @@ import { FootballLeaguesByIdsQueryDto } from './dto/football-leagues-by-ids-quer
 import { LeaguePlayerStatsQueryDto } from './dto/league-player-stats-query.dto';
 import { LeagueTeamStatsQueryDto } from './dto/league-team-stats-query.dto';
 import { PlayerCareerService } from './player-career.service';
+import { FootballFeaturedService } from './football-featured.service';
+import {
+  TopPlayersQueryDto,
+  TopTeamsQueryDto,
+} from './dto/featured-football-query.dto';
 
 @Public()
 @Controller('football')
@@ -32,6 +37,7 @@ export class FootballController {
     private readonly footballService: FootballService,
     private readonly footballCompositeService: FootballCompositeService,
     private readonly playerCareerService: PlayerCareerService,
+    private readonly footballFeaturedService: FootballFeaturedService,
   ) {}
 
   private buildFollowContext(
@@ -111,6 +117,11 @@ export class FootballController {
   @Get('fixtures')
   getFixtures(@Query() query: FootballQueryDto) {
     return this.footballService.getFixtures(query);
+  }
+
+  @Get('teams/top')
+  getTopTeams(@Query() query: TopTeamsQueryDto) {
+    return this.footballFeaturedService.getTopTeams(query);
   }
 
   @Get('teams/:teamId/fixtures')
@@ -253,6 +264,11 @@ export class FootballController {
   @Get('standings')
   getStandings(@Query() query: FootballQueryDto) {
     return this.footballService.getStandings(query);
+  }
+
+  @Get('players/top')
+  getTopPlayers(@Query() query: TopPlayersQueryDto) {
+    return this.footballFeaturedService.getTopPlayers(query);
   }
 
   @Get('players/squads')

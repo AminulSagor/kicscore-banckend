@@ -15,6 +15,7 @@ import { PlayerCareerSeasonStat } from './entities/player-career-season-stat.ent
 import { PlayerCareerTransferSnapshot } from './entities/player-career-transfer-snapshot.entity';
 import { PlayerCareerService } from './player-career.service';
 import { PlayerCareerCacheWorker } from './workers/player-career-cache.worker';
+import { FootballFeaturedService } from './football-featured.service';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { PlayerCareerCacheWorker } from './workers/player-career-cache.worker';
     FootballService,
     FootballCompositeService,
     PlayerCareerService,
+    FootballFeaturedService,
     TeamTrophyPreviewWorker,
     PlayerCareerCacheWorker,
   ],
@@ -43,6 +45,7 @@ import { PlayerCareerCacheWorker } from './workers/player-career-cache.worker';
     ApiFootballCacheService,
     FootballCompositeService,
     PlayerCareerService,
+    FootballFeaturedService,
   ],
 })
 export class ApiFootballModule {}
