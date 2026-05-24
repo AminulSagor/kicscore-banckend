@@ -691,17 +691,7 @@ export class FootballService {
         continue;
       }
 
-      const response = (await this.cached(
-        '/players/profiles',
-        {
-          search: promotion.lookupQuery,
-        },
-        apiFootballCacheConfig.search,
-      )) as unknown as FootballSearchApiResponse<FootballSearchPlayerItem>;
-
-      const resolvedPlayer = (response.response ?? []).find((item) => {
-        return this.isPromotedPlayerMatch(item, promotion);
-      });
+      const resolvedPlayer = await this.resolvePromotedPlayerProfile(promotion);
 
       if (resolvedPlayer) {
         supplementalItems.push(resolvedPlayer);
@@ -709,6 +699,42 @@ export class FootballService {
     }
 
     return supplementalItems;
+  }
+
+  private async resolvePromotedPlayerProfile(
+    promotion: PlayerSearchPromotion,
+  ): Promise<FootballSearchPlayerItem | null> {
+    if (promotion.id) {
+      const idResponse = (await this.cached(
+        '/players/profiles',
+        {
+          player: String(promotion.id),
+        },
+        apiFootballCacheConfig.search,
+      )) as unknown as FootballSearchApiResponse<FootballSearchPlayerItem>;
+
+      const idMatch = (idResponse.response ?? []).find((item) => {
+        return item.player?.id === promotion.id;
+      });
+
+      if (idMatch) {
+        return idMatch;
+      }
+    }
+
+    const searchResponse = (await this.cached(
+      '/players/profiles',
+      {
+        search: promotion.lookupQuery,
+      },
+      apiFootballCacheConfig.search,
+    )) as unknown as FootballSearchApiResponse<FootballSearchPlayerItem>;
+
+    return (
+      (searchResponse.response ?? []).find((item) => {
+        return this.isPromotedPlayerMatch(item, promotion);
+      }) ?? null
+    );
   }
 
   private getPlayerSearchScore(
@@ -1301,6 +1327,52 @@ export class FootballService {
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
+    });
+  }
+
+  //======= Featured Lists Profile Fetch =======//
+
+  getFeaturedTeamProfile(search: string): Promise<ApiFootballResponse> {
+    return this.getFeaturedProfile('/teams', { search });
+  }
+
+  getFeaturedPlayerProfile(search: string): Promise<ApiFootballResponse> {
+    return this.getFeaturedProfile('/players/profiles', { search });
+  }
+
+  getFeaturedPlayerProfileById(playerId: number): Promise<ApiFootballResponse> {
+    return this.getFeaturedProfile('/players/profiles', {
+      player: String(playerId),
+    });
+  }
+
+  private getFeaturedProfile(
+    endpoint: string,
+    params: QueryParams,
+  ): Promise<ApiFootballResponse> {
+    const ttlSeconds = this.toPositiveNumber(
+      process.env.CACHE_TTL_FEATURED_LISTS_SECONDS,
+      86400,
+    );
+
+    const staleTtlSeconds = this.toPositiveNumber(
+      process.env.CACHE_STALE_FEATURED_LISTS_SECONDS,
+      86400,
+    );
+
+    const cacheKey = `api-football:featured-profile:${buildApiFootballCacheKey(
+      endpoint,
+      params,
+    )}`;
+
+    return this.apiFootballCacheService.getCached<ApiFootballResponse>({
+      endpoint,
+      params,
+      cacheKey,
+      ttlSeconds,
+      staleTtlSeconds,
+      lockTtlSeconds: 20,
+      priority: ApiFootballRequestPriority.LOW,
     });
   }
 }
