@@ -26,10 +26,16 @@ import {
   FootballSearchPromotion,
   LEAGUE_SEARCH_PROMOTIONS,
   PLAYER_SEARCH_PROMOTIONS,
+  PlayerSearchPromotion,
 } from 'src/common/constants/football-search-ranking.constant';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
+
+type SearchPromotionLike = {
+  aliases: readonly string[];
+  priority: number;
+};
 
 @Injectable()
 export class FootballService {
@@ -623,22 +629,14 @@ export class FootballService {
 
     const sourceItems = rawResponse.response ?? [];
 
-    const existingIds = new Set(
-      sourceItems
-        .map((item) => item.player?.id)
-        .filter((id): id is number => typeof id === 'number'),
-    );
-
     const matchingPromotions = PLAYER_SEARCH_PROMOTIONS.filter((promotion) => {
       return this.isPromotionMatch(normalizedSearch, promotion);
     });
 
-    const missingPromotions = matchingPromotions.filter((promotion) => {
-      return !existingIds.has(promotion.id);
-    });
-
-    const supplementalItems =
-      await this.fetchPromotedPlayers(missingPromotions);
+    const supplementalItems = await this.fetchMissingPromotedPlayers(
+      sourceItems,
+      matchingPromotions,
+    );
 
     const mergedItems = this.mergePlayerItems(sourceItems, supplementalItems);
 
@@ -661,30 +659,6 @@ export class FootballService {
     );
   }
 
-  private async fetchPromotedPlayers(
-    promotions: readonly FootballSearchPromotion[],
-  ): Promise<FootballSearchPlayerItem[]> {
-    if (!promotions.length) {
-      return [];
-    }
-
-    const responses = await Promise.all(
-      promotions.map(async (promotion) => {
-        const response = (await this.cached(
-          '/players/profiles',
-          {
-            player: String(promotion.id),
-          },
-          apiFootballCacheConfig.search,
-        )) as unknown as FootballSearchApiResponse<FootballSearchPlayerItem>;
-
-        return response.response ?? [];
-      }),
-    );
-
-    return responses.flat();
-  }
-
   private mergePlayerItems(
     sourceItems: FootballSearchPlayerItem[],
     supplementalItems: FootballSearchPlayerItem[],
@@ -702,31 +676,103 @@ export class FootballService {
     return Array.from(map.values());
   }
 
+  private async fetchMissingPromotedPlayers(
+    sourceItems: FootballSearchPlayerItem[],
+    promotions: readonly PlayerSearchPromotion[],
+  ): Promise<FootballSearchPlayerItem[]> {
+    const supplementalItems: FootballSearchPlayerItem[] = [];
+
+    for (const promotion of promotions) {
+      const alreadyExists = sourceItems.some((item) => {
+        return this.isPromotedPlayerMatch(item, promotion);
+      });
+
+      if (alreadyExists) {
+        continue;
+      }
+
+      const response = (await this.cached(
+        '/players/profiles',
+        {
+          search: promotion.lookupQuery,
+        },
+        apiFootballCacheConfig.search,
+      )) as unknown as FootballSearchApiResponse<FootballSearchPlayerItem>;
+
+      const resolvedPlayer = (response.response ?? []).find((item) => {
+        return this.isPromotedPlayerMatch(item, promotion);
+      });
+
+      if (resolvedPlayer) {
+        supplementalItems.push(resolvedPlayer);
+      }
+    }
+
+    return supplementalItems;
+  }
+
   private getPlayerSearchScore(
     item: FootballSearchPlayerItem,
     normalizedSearch: string,
   ): number {
-    const playerId = item.player?.id;
+    const searchableName = this.getPlayerSearchableName(item);
 
-    const searchableName = [
-      item.player?.name,
-      item.player?.firstname,
-      item.player?.lastname,
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join(' ');
+    const directNameScore = this.getSearchTextScore(
+      normalizedSearch,
+      searchableName,
+    );
 
-    const promotion = PLAYER_SEARCH_PROMOTIONS.find((entry) => {
-      return entry.id === playerId;
+    const matchedPromotion = PLAYER_SEARCH_PROMOTIONS.find((promotion) => {
+      return (
+        this.isPromotionMatch(normalizedSearch, promotion) &&
+        this.isPromotedPlayerMatch(item, promotion)
+      );
     });
 
-    const nameScore = this.getSearchTextScore(normalizedSearch, searchableName);
+    if (!matchedPromotion) {
+      return directNameScore;
+    }
 
-    const promotionScore = promotion
-      ? this.getPromotionScore(normalizedSearch, promotion)
-      : 0;
+    return Math.max(
+      directNameScore,
+      this.getPromotionScore(normalizedSearch, matchedPromotion),
+    );
+  }
 
-    return Math.max(nameScore, promotionScore);
+  private isPromotedPlayerMatch(
+    item: FootballSearchPlayerItem,
+    promotion: PlayerSearchPromotion,
+  ): boolean {
+    if (promotion.id && item.player?.id === promotion.id) {
+      return true;
+    }
+
+    const searchableName = this.getPlayerSearchableName(item);
+    const normalizedCandidate = this.normalizeSearchText(searchableName);
+    const normalizedCanonicalName = this.normalizeSearchText(
+      promotion.canonicalName,
+    );
+
+    const canonicalTokens = normalizedCanonicalName
+      .split(' ')
+      .filter((token) => token.length > 1);
+
+    if (canonicalTokens.length === 1) {
+      return (
+        this.normalizeSearchText(item.player?.name ?? '') ===
+        normalizedCanonicalName
+      );
+    }
+
+    return canonicalTokens.every((token) => {
+      return normalizedCandidate.includes(token);
+    });
+  }
+
+  private getPlayerSearchableName(item: FootballSearchPlayerItem): string {
+    return [item.player?.name, item.player?.firstname, item.player?.lastname]
+      .filter((value): value is string => Boolean(value))
+      .join(' ');
   }
 
   private toPositiveNumber(value: unknown, fallback: number): number {
@@ -955,7 +1001,7 @@ export class FootballService {
 
   private isPromotionMatch(
     normalizedSearch: string,
-    promotion: FootballSearchPromotion,
+    promotion: SearchPromotionLike,
   ): boolean {
     return promotion.aliases.some((alias) => {
       return this.getSearchTextScore(normalizedSearch, alias) >= 5000;
@@ -964,7 +1010,7 @@ export class FootballService {
 
   private getPromotionScore(
     normalizedSearch: string,
-    promotion: FootballSearchPromotion,
+    promotion: SearchPromotionLike,
   ): number {
     const bestAliasScore = Math.max(
       ...promotion.aliases.map((alias) => {
