@@ -18,6 +18,7 @@ import { NotificationEventPayloadItem } from './entities/notification-event-payl
 import { NotificationDeliveryResponseItem } from './entities/notification-delivery-response-item.entity';
 import { UserNotificationContentSnapshot } from './entities/user-notification-content-snapshot.entity';
 import { UserNotificationPayloadItem } from './entities/user-notification-payload-item.entity';
+import { NotificationRetentionService } from './notification-retention.service';
 
 @Module({
   imports: [
@@ -45,12 +46,14 @@ import { UserNotificationPayloadItem } from './entities/user-notification-payloa
     DeviceTokensService,
     NotificationPreferencesService,
     NotificationsService,
+    NotificationRetentionService,
   ],
   exports: [
     FcmService,
     DeviceTokensService,
     NotificationPreferencesService,
     NotificationsService,
+    NotificationRetentionService,
   ],
 })
 export class NotificationsModule {}

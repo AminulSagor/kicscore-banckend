@@ -21,11 +21,6 @@ const syncCronExpression = getCronExpression(
   CronExpression.EVERY_HOUR,
 );
 
-const cleanupCronExpression = getCronExpression(
-  'THENEWS_CLEANUP_CRON',
-  CronExpression.EVERY_DAY_AT_3AM,
-);
-
 @Injectable()
 export class TheNewsCronService implements OnModuleInit {
   private readonly logger = new Logger(TheNewsCronService.name);
@@ -53,24 +48,9 @@ export class TheNewsCronService implements OnModuleInit {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      const trace = error instanceof Error ? error.stack : undefined;
 
-      this.logger.error(`Sports news sync failed: ${message}`);
-    }
-  }
-
-  @Cron(cleanupCronExpression)
-  async handleOldNewsCleanup(): Promise<void> {
-    try {
-      const result =
-        await this.theNewsService.deleteArticlesOlderThanThirtyDays();
-
-      this.logger.log(
-        `Old news cleanup completed. Deleted: ${result.deleted}, Cutoff: ${result.cutoffDate.toISOString()}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-
-      this.logger.error(`Old news cleanup failed: ${message}`);
+      this.logger.error(`Sports news sync failed: ${message}`, trace);
     }
   }
 }
