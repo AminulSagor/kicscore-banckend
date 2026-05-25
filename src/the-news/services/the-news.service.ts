@@ -126,7 +126,6 @@ export class TheNewsService {
       take: limit,
     });
 
-    // Await all the signed URLs
     const mappedArticles = await Promise.all(
       articles.map((article) =>
         mapNewsArticleResponse(article, this.filesService),
@@ -191,7 +190,7 @@ export class TheNewsService {
       take: 100,
     });
 
-    const topCandidates = candidateArticles
+    const rankedArticles = candidateArticles
       .filter((article) => article.externalUuid !== baseArticle.externalUuid)
       .map((article) => ({
         article,
@@ -199,41 +198,21 @@ export class TheNewsService {
       }))
       .filter(({ score }) => score > 0)
       .sort((left, right) => right.score - left.score)
-      .slice(0, limit);
+      .slice(0, limit)
+      .map(({ article }) => article);
 
-    const similarArticles = await Promise.all(
-      topCandidates.map(({ article }) =>
-        mapNewsArticleResponse(article, this.filesService),
+    const [mappedBaseArticle, mappedSimilarArticles] = await Promise.all([
+      mapNewsArticleResponse(baseArticle, this.filesService),
+      Promise.all(
+        rankedArticles.map((article) =>
+          mapNewsArticleResponse(article, this.filesService),
+        ),
       ),
-    );
-
-    const mappedBaseArticle = await mapNewsArticleResponse(
-      baseArticle,
-      this.filesService,
-    );
+    ]);
 
     return {
       article: mappedBaseArticle,
-      similar: similarArticles,
-    };
-  }
-
-  async deleteArticlesOlderThanThirtyDays(): Promise<{
-    deleted: number;
-    cutoffDate: Date;
-  }> {
-    const retentionDays = this.getRetentionDays();
-    const cutoffDate = new Date();
-
-    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
-
-    const result = await this.newsArticleRepository.delete({
-      publishedAt: LessThan(cutoffDate),
-    });
-
-    return {
-      deleted: result.affected ?? 0,
-      cutoffDate,
+      similar: mappedSimilarArticles,
     };
   }
 
@@ -390,17 +369,6 @@ export class TheNewsService {
     }
   }
 
-  private getRetentionDays(): number {
-    const rawValue = process.env.THENEWS_RETENTION_DAYS;
-    const parsedValue = Number(rawValue ?? 30);
-
-    if (!rawValue) {
-      return 30;
-    }
-
-    return Number.isNaN(parsedValue) || parsedValue <= 0 ? 30 : parsedValue;
-  }
-
   private scoreSimilarity(
     baseArticle: NewsArticle,
     candidate: NewsArticle,
@@ -410,6 +378,7 @@ export class TheNewsService {
     const baseCategories = new Set(
       baseArticle.categories?.map((category) => category.category) ?? [],
     );
+
     const candidateCategories = new Set(
       candidate.categories?.map((category) => category.category) ?? [],
     );
@@ -490,6 +459,7 @@ export class TheNewsService {
 
     return article.categories?.includes('sports') ?? false;
   }
+
   async createCustomArticle(
     adminUserId: string,
     dto: CreateCustomNewsDto,
@@ -687,7 +657,7 @@ export class TheNewsService {
 
     // Return the fresh mapped data
     const updatedArticle = await this.getArticleByUuid(uuid);
-    return mapNewsArticleResponse(updatedArticle, this.filesService);
+    return await mapNewsArticleResponse(updatedArticle, this.filesService);
   }
 
   async deleteArticle(uuid: string): Promise<void> {

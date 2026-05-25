@@ -18,6 +18,7 @@ import { TheNewsModule } from './the-news/the-news.module';
 import { FootballNotificationsModule } from './modules/football-notifications/football-notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { FootballHistoryModule } from './modules/fifa-world-cup/football-history.module';
+import { DataRetentionModule } from './modules/data-retention/data-retention.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { FootballHistoryModule } from './modules/fifa-world-cup/football-history
     TheNewsModule,
     FootballNotificationsModule,
     FootballHistoryModule,
+    DataRetentionModule,
   ],
   providers: [
     {

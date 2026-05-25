@@ -18,6 +18,7 @@ import { FollowsModule } from 'src/modules/follows/follows.module';
 import { NotificationsModule } from 'src/notifications/notifications.module';
 import { NewsNotificationWorker } from './services/news-notification.worker';
 import { FilesModule } from 'src/modules/files/files.module';
+import { NewsRetentionService } from './services/news-retention.service';
 
 @Module({
   imports: [
@@ -42,7 +43,8 @@ import { FilesModule } from 'src/modules/files/files.module';
     TheNewsService,
     TheNewsCronService,
     NewsNotificationWorker,
+    NewsRetentionService,
   ],
-  exports: [TheNewsService],
+  exports: [TheNewsService, NewsRetentionService],
 })
 export class TheNewsModule {}

@@ -1,4 +1,9 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+
 import { RedisService } from '../redis/redis.service';
 import { ApiFootballClient } from './api-football.client';
 import { ApiFootballRequestPriority } from './enums/api-football-request-priority.enum';
@@ -17,6 +22,8 @@ interface CachedApiOptions<T> {
 
 @Injectable()
 export class ApiFootballCacheService {
+  private readonly logger = new Logger(ApiFootballCacheService.name);
+
   constructor(
     private readonly redisService: RedisService,
     private readonly apiFootballClient: ApiFootballClient,
@@ -39,10 +46,11 @@ export class ApiFootballCacheService {
     const cachedData = await this.redisService.get<T>(cacheKey);
 
     if (cachedData) {
-      console.log('CACHE HIT:', cacheKey);
+      this.logger.debug(`CACHE HIT: ${cacheKey}`);
       return cachedData;
     }
-    console.log('CACHE MISS:', cacheKey);
+
+    this.logger.debug(`CACHE MISS: ${cacheKey}`);
 
     const hasLock = await this.redisService.setLock(lockKey, lockTtlSeconds);
 
@@ -96,10 +104,12 @@ export class ApiFootballCacheService {
     const usagePercent = await this.getUsagePercent();
 
     const softLimit = this.getNumberEnv('API_FOOTBALL_SOFT_LIMIT_PERCENT', 70);
+
     const lowPriorityCutoff = this.getNumberEnv(
       'API_FOOTBALL_LOW_PRIORITY_CUTOFF_PERCENT',
       85,
     );
+
     const hardLimit = this.getNumberEnv('API_FOOTBALL_HARD_LIMIT_PERCENT', 95);
 
     if (
@@ -121,8 +131,6 @@ export class ApiFootballCacheService {
     }
 
     if (usagePercent >= softLimit) {
-      // For now, this is only a soft checkpoint.
-      // Later we can use it to increase TTL dynamically.
       return;
     }
   }

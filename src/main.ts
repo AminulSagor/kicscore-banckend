@@ -1,10 +1,12 @@
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+
+const logger = new Logger('Bootstrap');
 
 async function bootstrap(): Promise<void> {
   try {
@@ -29,10 +31,16 @@ async function bootstrap(): Promise<void> {
     app.useGlobalInterceptors(new ResponseInterceptor());
 
     const port = process.env.PORT ? Number(process.env.PORT) : 9000;
-    console.log(`Server is running on port ${port}`);
+
     await app.listen(port);
+
+    logger.log(`Server is running on port ${port}`);
   } catch (error) {
-    console.error('Failed to bootstrap application:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    const trace = error instanceof Error ? error.stack : undefined;
+
+    logger.error(`Failed to bootstrap application: ${message}`, trace);
+
     process.exit(1);
   }
 }
