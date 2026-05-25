@@ -634,8 +634,8 @@ export class LiveFixtureNotificationWorker
 
     const event = await this.notificationsService.createEvent({
       eventType: NotificationType.GOAL,
-      entityType: FollowEntityType.TEAM,
-      entityId: params.scoringTeamId,
+      entityType: FollowEntityType.FIXTURE,
+      entityId: params.fixtureId,
       fixtureId: params.fixtureId,
       teamId: params.scoringTeamId,
       leagueId: params.leagueId,
