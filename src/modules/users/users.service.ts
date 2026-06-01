@@ -18,6 +18,8 @@ import { UserStatus } from './enums/user-status.enum';
 import { FileStatus } from '../files/enums/file-status.enum';
 import { S3Service } from '../aws/s3.service';
 import { UserSetting } from './entities/user-setting.entity';
+import { DeviceToken } from '../../notifications/entities/device-token.entity';
+import { OtpCode } from '../auth/entities/otp-code.entity';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { compareHash, hashValue } from 'src/common/utils/password.util';
 import { UpdateUserSettingsDto } from './dto/update-user-settings.dto';
@@ -37,6 +39,12 @@ export class UsersService {
 
     @InjectRepository(FileEntity)
     private readonly fileRepository: Repository<FileEntity>,
+
+    @InjectRepository(DeviceToken)
+    private readonly deviceTokenRepository: Repository<DeviceToken>,
+
+    @InjectRepository(OtpCode)
+    private readonly otpCodeRepository: Repository<OtpCode>,
 
     @InjectRepository(UserSetting)
     private readonly userSettingRepository: Repository<UserSetting>,
@@ -158,19 +166,37 @@ export class UsersService {
       throw new BadRequestException('Full name confirmation does not match');
     }
 
+    // Fully remove user and all non-cascading related data.
     await this.dataSource.transaction(async (manager) => {
-      await manager.update(UserProfile, user.profile.id, {
-        fullName: 'Deleted User',
-        profilePhotoFileId: null,
+      // remove files from S3 for uploaded files owned by user
+      const files = await manager.find(FileEntity, {
+        where: { ownerUserId: userId },
       });
 
-      await manager.update(User, user.id, {
-        email: `deleted-${user.id}@deleted.local`,
-        passwordHash: '',
-        status: UserStatus.DELETED,
-      });
+      for (const f of files) {
+        if (f.status === FileStatus.UPLOADED) {
+          try {
+            await this.s3Service.deleteObject(f.fileKey);
+          } catch {
+            // swallow S3 delete errors to not block account deletion
+          }
+        }
+      }
 
-      await manager.softDelete(User, user.id);
+      // delete file records
+      await manager.delete(FileEntity, { ownerUserId: userId });
+
+      // delete device tokens (these are set to SET NULL on FK, we remove them to leave no trace)
+      await manager.delete(DeviceToken, { userId });
+
+      // delete otp codes linked to user
+      await manager.delete(OtpCode, { userId });
+
+      // delete user settings
+      await manager.delete(UserSetting, { userId });
+
+      // deleting the user will cascade-delete profile and most notification-related records
+      await manager.delete(User, { id: userId });
     });
   }
 
