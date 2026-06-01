@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 
 import { OtpPurpose } from '../auth/enums/otp-purpose.enum';
-import { GmailSmtpService } from './gmail-smtp.service';
+import { ZohoMailApiService } from './zoho-mail-api.service';
 
 @Injectable()
 export class SesService {
@@ -12,7 +12,7 @@ export class SesService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly gmailSmtpService: GmailSmtpService,
+    private readonly zohoMailApiService: ZohoMailApiService,
   ) {
     this.client = this.shouldBypassSes()
       ? null
@@ -41,9 +41,9 @@ export class SesService {
     const html = this.buildOtpTemplate(otp, purpose);
 
     if (this.shouldBypassSes()) {
-      this.logger.log('Sending OTP email using Gmail SMTP fallback');
+      this.logger.log('Sending OTP email using Zoho Mail API fallback');
 
-      await this.gmailSmtpService.sendEmail({
+      await this.zohoMailApiService.sendEmail({
         to: receiverEmail,
         subject,
         html,
@@ -52,6 +52,18 @@ export class SesService {
       return;
     }
 
+    await this.sendWithSes({
+      to: receiverEmail,
+      subject,
+      html,
+    });
+  }
+
+  private async sendWithSes(params: {
+    to: string;
+    subject: string;
+    html: string;
+  }): Promise<void> {
     if (!this.client) {
       throw new Error('AWS SES client is not initialized');
     }
@@ -62,16 +74,16 @@ export class SesService {
       new SendEmailCommand({
         Source: fromEmail,
         Destination: {
-          ToAddresses: [receiverEmail],
+          ToAddresses: [params.to],
         },
         Message: {
           Subject: {
-            Data: subject,
+            Data: params.subject,
             Charset: 'UTF-8',
           },
           Body: {
             Html: {
-              Data: html,
+              Data: params.html,
               Charset: 'UTF-8',
             },
           },
