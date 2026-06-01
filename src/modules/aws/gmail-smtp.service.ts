@@ -16,6 +16,7 @@ export class GmailSmtpService {
 
   async sendEmail(params: SendGmailEmailParams): Promise<void> {
     const transporter = this.getTransporter();
+
     const fromEmail =
       this.configService.get<string>('GMAIL_SMTP_FROM_EMAIL') ??
       this.configService.getOrThrow<string>('GMAIL_SMTP_USER');
@@ -42,12 +43,28 @@ export class GmailSmtpService {
       .getOrThrow<string>('GMAIL_SMTP_APP_PASSWORD')
       .replace(/\s+/g, '');
 
+    const host =
+      this.configService.get<string>('GMAIL_SMTP_HOST') ?? 'smtp.gmail.com';
+
+    const port = Number(
+      this.configService.get<string>('GMAIL_SMTP_PORT') ?? 587,
+    );
+
+    const secure =
+      this.configService.get<string>('GMAIL_SMTP_SECURE') === 'true';
+
     this.transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host,
+      port,
+      secure,
       auth: {
         user,
         pass: appPassword,
       },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 30000,
+      requireTLS: !secure,
     });
 
     return this.transporter;
