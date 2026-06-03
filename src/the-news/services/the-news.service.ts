@@ -185,18 +185,26 @@ export class TheNewsService {
     const limit = query?.limit ?? 5;
     const baseArticle = await this.getArticleByUuid(uuid);
 
-    const candidateArticles = await this.newsArticleRepository.find({
-      relations: {
-        content: true,
-        source: true,
-        categories: true,
-        mappedEntities: true,
-      },
-      order: {
-        publishedAt: 'DESC',
-      },
-      take: 100,
-    });
+    // Respect AdsenceApprove env flag: when false (or missing) only consider
+    // `kicscore.com` source articles as candidates for similarity.
+    const adsenceApprove = getBooleanEnv('AdsenceApprove', false);
+
+    const candidateQuery = this.newsArticleRepository
+      .createQueryBuilder('article')
+      .leftJoinAndSelect('article.content', 'content')
+      .leftJoinAndSelect('article.source', 'source')
+      .leftJoinAndSelect('article.categories', 'categories')
+      .leftJoinAndSelect('article.mappedEntities', 'mappedEntities')
+      .orderBy('article.publishedAt', 'DESC')
+      .take(100);
+
+    if (!adsenceApprove) {
+      candidateQuery.andWhere('source.sourceName = :sourceName', {
+        sourceName: 'kicscore.com',
+      });
+    }
+
+    const candidateArticles = await candidateQuery.getMany();
 
     const rankedArticles = candidateArticles
       .filter((article) => article.externalUuid !== baseArticle.externalUuid)
