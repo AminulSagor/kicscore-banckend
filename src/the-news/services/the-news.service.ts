@@ -23,6 +23,7 @@ import {
   SimilarNewsResponse,
   mapNewsArticleResponse,
 } from '../types/news-article-response.type';
+import { getBooleanEnv } from 'src/common/utils/env.util';
 import { NewsMappedEntity } from '../types/news-entity-mapping.type';
 import {
   TheNewsApiArticle,
@@ -112,24 +113,31 @@ export class TheNewsService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
-    const [articles, total] = await this.newsArticleRepository.findAndCount({
-      relations: {
-        content: true,
-        source: true,
-        categories: true,
-        mappedEntities: true,
-      },
-      order: {
-        publishedAt: 'DESC',
-      },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+  // Decide whether to restrict sources based on AdsenceApprove env var.
+  // Use helper so a missing env var defaults to false in production.
+  const adsenceApprove = getBooleanEnv('AdsenceApprove', false);
+
+    const queryBuilder = this.newsArticleRepository
+      .createQueryBuilder('article')
+      .leftJoinAndSelect('article.content', 'content')
+      .leftJoinAndSelect('article.source', 'source')
+      .leftJoinAndSelect('article.categories', 'categories')
+      .leftJoinAndSelect('article.mappedEntities', 'mappedEntities')
+      .orderBy('article.publishedAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (!adsenceApprove) {
+      // When AdsenceApprove is false, only show articles whose source is exactly 'kicscore.com'
+      queryBuilder.andWhere('source.sourceName = :sourceName', {
+        sourceName: 'kicscore.com',
+      });
+    }
+
+    const [articles, total] = await queryBuilder.getManyAndCount();
 
     const mappedArticles = await Promise.all(
-      articles.map((article) =>
-        mapNewsArticleResponse(article, this.filesService),
-      ),
+      articles.map((article) => mapNewsArticleResponse(article, this.filesService)),
     );
 
     return {
