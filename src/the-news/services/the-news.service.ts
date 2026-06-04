@@ -86,9 +86,12 @@ export class TheNewsService {
     const articles = Array.isArray(response.data) ? response.data : [];
     const sportsArticles = articles
       .filter((article) => this.isValidSportsArticle(article))
+      // Drop articles with ignored titles
       .filter((article) =>
         String(article.title ?? '').toLowerCase().trim() !== IGNORED_API_TITLE,
-      );
+      )
+      // Drop articles that have no source or no image
+      .filter((article) => article.source && article.image_url);
 
     if (!sportsArticles.length) {
       this.logger.warn('No sports news articles found from TheNewsAPI');
@@ -143,6 +146,9 @@ export class TheNewsService {
     queryBuilder.andWhere('LOWER(article.title) != :ignoredTitle', {
       ignoredTitle: IGNORED_API_TITLE,
     });
+  // Exclude articles missing a source or image
+  queryBuilder.andWhere('source.sourceName IS NOT NULL');
+  queryBuilder.andWhere('content.imageUrl IS NOT NULL');
 
     const [articles, total] = await queryBuilder.getManyAndCount();
 
@@ -218,6 +224,9 @@ export class TheNewsService {
     candidateQuery.andWhere('LOWER(article.title) != :ignoredTitle', {
       ignoredTitle: IGNORED_API_TITLE,
     });
+  // Exclude candidates that lack source or image
+  candidateQuery.andWhere('source.sourceName IS NOT NULL');
+  candidateQuery.andWhere('content.imageUrl IS NOT NULL');
 
     const candidateArticles = await candidateQuery.getMany();
 
@@ -254,6 +263,14 @@ export class TheNewsService {
     if (String(article.title ?? '').toLowerCase().trim() === IGNORED_API_TITLE) {
       this.logger.log('Skipping ignored external article by title: ' + article.title);
       throw new BadRequestException('Ignored external article');
+    }
+
+    // Defensive: do not save articles that have no source or no image
+    if (!article.source || !article.image_url) {
+      this.logger.log(
+        `Skipping external article missing source or image: title=${article.title}`,
+      );
+      throw new BadRequestException('Ignored external article missing source/image');
     }
 
     let newsArticle = await this.newsArticleRepository.findOne({
