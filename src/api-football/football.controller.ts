@@ -6,6 +6,8 @@ import {
   ParseIntPipe,
   Query,
   UseGuards,
+  Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 
 import { Public } from '../common/decorators/public.decorator';
@@ -370,20 +372,40 @@ export class FootballController {
     @CurrentUser() user: JwtPayload | null,
     @Headers('x-installation-id') installationId?: string,
   ) {
-    const data = await this.playerCareerService.getPlayerCareerTotals(
-      String(playerId),
-      query,
-    );
-
-    return this.footballCompositeService.withFollowMeta(
-      data,
-      this.buildFollowContext(
-        user,
-        installationId,
-        FollowEntityType.PLAYER,
+    try {
+      const data = await this.playerCareerService.getPlayerCareerTotals(
         String(playerId),
-      ),
-    );
+        query,
+      );
+
+      return this.footballCompositeService.withFollowMeta(
+        data,
+        this.buildFollowContext(
+          user,
+          installationId,
+          FollowEntityType.PLAYER,
+          String(playerId),
+        ),
+      );
+    } catch (error) {
+      const logger = new Logger(FootballController.name);
+      logger.error(
+        `Failed to get player career totals for player=${playerId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+
+      // If the service already threw a ServiceUnavailableException, rethrow
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+
+      // For all other errors, return a generic service unavailable error
+      throw new ServiceUnavailableException(
+        'Unable to fetch player career data at this time.',
+      );
+    }
   }
 
   @UseGuards(OptionalJwtAuthGuard)
