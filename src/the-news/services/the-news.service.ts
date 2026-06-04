@@ -24,6 +24,9 @@ import {
   mapNewsArticleResponse,
 } from '../types/news-article-response.type';
 import { getBooleanEnv } from 'src/common/utils/env.util';
+
+// Titles from external APIs that should be ignored entirely (not stored or served)
+const IGNORED_API_TITLE = 'sportsnet.ca';
 import { NewsMappedEntity } from '../types/news-entity-mapping.type';
 import {
   TheNewsApiArticle,
@@ -81,9 +84,11 @@ export class TheNewsService {
     );
 
     const articles = Array.isArray(response.data) ? response.data : [];
-    const sportsArticles = articles.filter((article) =>
-      this.isValidSportsArticle(article),
-    );
+    const sportsArticles = articles
+      .filter((article) => this.isValidSportsArticle(article))
+      .filter((article) =>
+        String(article.title ?? '').toLowerCase().trim() !== IGNORED_API_TITLE,
+      );
 
     if (!sportsArticles.length) {
       this.logger.warn('No sports news articles found from TheNewsAPI');
@@ -133,6 +138,11 @@ export class TheNewsService {
         sourceName: 'kicscore.com',
       });
     }
+
+    // Always exclude ignored API titles from feeds
+    queryBuilder.andWhere('LOWER(article.title) != :ignoredTitle', {
+      ignoredTitle: IGNORED_API_TITLE,
+    });
 
     const [articles, total] = await queryBuilder.getManyAndCount();
 
@@ -204,6 +214,11 @@ export class TheNewsService {
       });
     }
 
+    // Exclude ignored API titles from similarity candidates
+    candidateQuery.andWhere('LOWER(article.title) != :ignoredTitle', {
+      ignoredTitle: IGNORED_API_TITLE,
+    });
+
     const candidateArticles = await candidateQuery.getMany();
 
     const rankedArticles = candidateArticles
@@ -234,6 +249,12 @@ export class TheNewsService {
 
   private async saveArticle(article: TheNewsApiArticle): Promise<NewsArticle> {
     const now = new Date();
+
+    // Defensive: do not save articles that come from external APIs with ignored titles
+    if (String(article.title ?? '').toLowerCase().trim() === IGNORED_API_TITLE) {
+      this.logger.log('Skipping ignored external article by title: ' + article.title);
+      throw new BadRequestException('Ignored external article');
+    }
 
     let newsArticle = await this.newsArticleRepository.findOne({
       where: {
