@@ -28,6 +28,7 @@ import {
   PLAYER_SEARCH_PROMOTIONS,
   PlayerSearchPromotion,
 } from 'src/common/constants/football-search-ranking.constant';
+import { TOP_LEAGUE_IDS } from 'src/common/constants/top-league-ids.constant';
 
 type QueryParams = Record<string, string | number | boolean | undefined>;
 type ApiFootballResponse = unknown;
@@ -122,16 +123,49 @@ export class FootballService {
     };
   }
 
-  getLiveFixtures(): Promise<ApiFootballResponse> {
-    return this.cachedPaginated(
-      '/fixtures',
-      { live: 'all' },
-      apiFootballCacheConfig.liveFixtures,
+  // getLiveFixtures(): Promise<ApiFootballResponse> {
+  //   return this.cachedPaginated(
+  //     '/fixtures',
+  //     { live: 'all' },
+  //     apiFootballCacheConfig.liveFixtures,
+  //     ApiFootballRequestPriority.HIGH,
+  //   ).then((data) => this.sortLiveFixturesByTopLeaguePriority(data));
+  // }
+
+  getLiveFixtures(query: QueryParams = {}): Promise<ApiFootballResponse> {
+    return this.getSortedLiveFixturesByTopLeaguePriority(
+      {
+        ...query,
+        live: 'all',
+      },
       ApiFootballRequestPriority.HIGH,
     );
   }
 
+  //   getFixtures(query: QueryParams): Promise<ApiFootballResponse> {
+  //   return this.cachedPaginated(
+  //     '/fixtures',
+  //     query,
+  //     this.getFixturesTtl(query),
+  //     ApiFootballRequestPriority.MEDIUM,
+  //     this.getFixtureDateCacheSuffix(query),
+  //   ).then((data) => {
+  //     if (String(query.live ?? '').toLowerCase() !== 'all') {
+  //       return data;
+  //     }
+
+  //     return this.sortLiveFixturesByTopLeaguePriority(data);
+  //   });
+  // }
+
   getFixtures(query: QueryParams): Promise<ApiFootballResponse> {
+    if (String(query.live ?? '').toLowerCase() === 'all') {
+      return this.getSortedLiveFixturesByTopLeaguePriority(
+        query,
+        ApiFootballRequestPriority.MEDIUM,
+      );
+    }
+
     return this.cachedPaginated(
       '/fixtures',
       query,
@@ -139,6 +173,92 @@ export class FootballService {
       ApiFootballRequestPriority.MEDIUM,
       this.getFixtureDateCacheSuffix(query),
     );
+  }
+
+  private async getSortedLiveFixturesByTopLeaguePriority(
+    query: QueryParams,
+    priority: ApiFootballRequestPriority,
+  ): Promise<ApiFootballResponse> {
+    const { apiParams, page, limit, shouldPaginate } =
+      this.extractBackendPaginationParams(query);
+
+    const data = (await this.cached(
+      '/fixtures',
+      apiParams,
+      apiFootballCacheConfig.liveFixtures,
+      priority,
+    )) as ApiFootballResponse;
+
+    const sortedData = this.sortLiveFixturesByTopLeaguePriority(data);
+
+    if (!shouldPaginate) {
+      return sortedData;
+    }
+
+    return this.paginateApiFootballResponse(sortedData, page, limit);
+  }
+
+  private sortLiveFixturesByTopLeaguePriority(
+    data: ApiFootballResponse,
+  ): ApiFootballResponse {
+    if (!this.isRecord(data)) {
+      return data;
+    }
+
+    const response = data.response;
+
+    if (!Array.isArray(response)) {
+      return data;
+    }
+
+    const topLeaguePriorityMap = new Map<number, number>(
+      TOP_LEAGUE_IDS.map((leagueId, index) => [leagueId, index]),
+    );
+
+    const sortedResponse = [...response]
+      .map((fixture, originalIndex) => {
+        const leagueId = this.getFixtureLeagueId(fixture);
+
+        return {
+          fixture,
+          originalIndex,
+          priority:
+            leagueId !== null
+              ? (topLeaguePriorityMap.get(leagueId) ?? Number.MAX_SAFE_INTEGER)
+              : Number.MAX_SAFE_INTEGER,
+        };
+      })
+      .sort((left, right) => {
+        if (left.priority !== right.priority) {
+          return left.priority - right.priority;
+        }
+
+        return left.originalIndex - right.originalIndex;
+      })
+      .map((item) => item.fixture);
+
+    return {
+      ...data,
+      response: sortedResponse,
+    } as ApiFootballResponse;
+  }
+
+  private getFixtureLeagueId(fixture: unknown): number | null {
+    if (!this.isRecord(fixture)) {
+      return null;
+    }
+
+    const league = fixture.league;
+
+    if (!this.isRecord(league)) {
+      return null;
+    }
+
+    return typeof league.id === 'number' ? league.id : null;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   getFixtureById(fixtureId: string): Promise<ApiFootballResponse> {
