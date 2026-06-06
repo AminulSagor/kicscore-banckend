@@ -55,8 +55,8 @@ export class FootballController {
   }
 
   @Get('fixtures/live')
-  getLiveFixtures() {
-    return this.footballService.getLiveFixtures();
+  getLiveFixtures(@Query() query: FootballQueryDto) {
+    return this.footballService.getLiveFixtures(query);
   }
 
   @Get('fixtures/by-time')
