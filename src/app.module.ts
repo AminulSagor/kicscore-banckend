@@ -19,6 +19,8 @@ import { FootballNotificationsModule } from './modules/football-notifications/fo
 import { AdminModule } from './modules/admin/admin.module';
 import { FootballHistoryModule } from './modules/fifa-world-cup/football-history.module';
 import { DataRetentionModule } from './modules/data-retention/data-retention.module';
+import { IosWorldCupRestrictionService } from './common/services/ios-world-cup-restriction.service';
+import { IosWorldCupInterceptor } from './common/interceptors/ios-world-cup.interceptor';
 
 @Module({
   imports: [
@@ -43,6 +45,8 @@ import { DataRetentionModule } from './modules/data-retention/data-retention.mod
     DataRetentionModule,
   ],
   providers: [
+    IosWorldCupRestrictionService,
+    IosWorldCupInterceptor,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

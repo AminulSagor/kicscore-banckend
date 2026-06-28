@@ -24,6 +24,8 @@ import { NotificationDeliveryStatus } from './enums/notification-delivery-status
 import { FirebaseError } from 'firebase-admin';
 import { TestSendNotificationDto } from './dto/test-send-notification.dto';
 import { DeviceToken } from './entities/device-token.entity';
+import { WORLD_CUP_LEAGUE_ID_STRING } from 'src/common/constants/ios-world-cup.constant';
+import { DevicePlatform } from './enums/device-platform.enum';
 
 type NotificationOwner =
   | {
@@ -445,6 +447,16 @@ export class NotificationsService {
         );
     }
 
+    /*
+     * For a World Cup event, remove only iOS tokens.
+     * Android and web tokens remain eligible.
+     */
+    deviceTokens = this.filterWorldCupIosTokens({
+      deviceTokens,
+      notificationEvent: input.notificationEvent,
+      data: input.data,
+    });
+
     if (!deviceTokens.length) {
       return {
         notification,
@@ -453,12 +465,6 @@ export class NotificationsService {
         failedCount: 0,
       };
     }
-
-    // const deviceTokens = owner.userId
-    //   ? await this.deviceTokensService.findActiveTokensByUserId(owner.userId)
-    //   : await this.deviceTokensService.findActiveTokensByInstallationId(
-    //       owner.installationId,
-    //     );
 
     let sentCount = 0;
     let failedCount = 0;
@@ -482,18 +488,24 @@ export class NotificationsService {
         });
 
         delivery.status = NotificationDeliveryStatus.SENT;
+
         delivery.providerMessageId = providerMessageId;
+
         delivery.sentAt = new Date();
 
         await this.notificationDeliveryRepository.save(delivery);
+
         sentCount += 1;
       } catch (error) {
         const firebaseError = error as FirebaseError;
 
         delivery.status = NotificationDeliveryStatus.FAILED;
+
         delivery.errorCode = firebaseError.code ?? 'unknown_error';
+
         delivery.errorMessage =
           firebaseError.message ?? 'Failed to send notification';
+
         delivery.failedAt = new Date();
 
         await this.notificationDeliveryRepository.save(delivery);
@@ -538,6 +550,65 @@ export class NotificationsService {
     }
 
     throw new BadRequestException('Notification owner is required');
+  }
+
+  private filterWorldCupIosTokens(params: {
+    deviceTokens: DeviceToken[];
+    notificationEvent: NotificationEvent;
+    data?: Record<string, unknown> | null;
+  }): DeviceToken[] {
+    const isWorldCupNotification = this.isWorldCupNotification(
+      params.notificationEvent,
+      params.data,
+    );
+
+    if (!isWorldCupNotification) {
+      return params.deviceTokens;
+    }
+
+    return params.deviceTokens.filter((deviceToken) => {
+      return deviceToken.platform !== DevicePlatform.IOS;
+    });
+  }
+
+  private isWorldCupNotification(
+    notificationEvent: NotificationEvent,
+    data?: Record<string, unknown> | null,
+  ): boolean {
+    if (notificationEvent.leagueId === WORLD_CUP_LEAGUE_ID_STRING) {
+      return true;
+    }
+
+    if (
+      notificationEvent.entityType === FollowEntityType.LEAGUE &&
+      notificationEvent.entityId === WORLD_CUP_LEAGUE_ID_STRING
+    ) {
+      return true;
+    }
+
+    /*
+     * This also blocks World Cup news notifications where
+     * leagueId might not have been added to the event.
+     */
+    if (
+      this.containsWorldCupText(notificationEvent.title) ||
+      this.containsWorldCupText(notificationEvent.body) ||
+      notificationEvent.deepLink?.includes('/leagues/1') === true
+    ) {
+      return true;
+    }
+
+    const dataLeagueId = data?.leagueId;
+
+    return String(dataLeagueId ?? '').trim() === WORLD_CUP_LEAGUE_ID_STRING;
+  }
+
+  private containsWorldCupText(value: string | null | undefined): boolean {
+    if (!value) {
+      return false;
+    }
+
+    return /\b(?:fifa[\s-]+)?world[\s-]+cup\b/i.test(value);
   }
 
   // for test only

@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { IosWorldCupInterceptor } from './common/interceptors/ios-world-cup.interceptor';
 
 const logger = new Logger('Bootstrap');
 
@@ -28,7 +29,11 @@ async function bootstrap(): Promise<void> {
     );
 
     app.useGlobalFilters(new HttpExceptionFilter());
-    app.useGlobalInterceptors(new ResponseInterceptor());
+    const iosWorldCupInterceptor = app.get(IosWorldCupInterceptor);
+    app.useGlobalInterceptors(
+      new ResponseInterceptor(),
+      iosWorldCupInterceptor,
+    );
 
     const port = process.env.PORT ? Number(process.env.PORT) : 9000;
 
